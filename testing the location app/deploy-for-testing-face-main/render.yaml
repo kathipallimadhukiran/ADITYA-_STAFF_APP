@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: face-recognition-api
+    env: python
+    buildCommand: |
+      apt-get update && apt-get install -y build-essential python3-dev
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: gunicorn --timeout 300 --workers 2 --threads 4 --worker-class gthread wsgi:application
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.12
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: GUNICORN_TIMEOUT
+        value: 300
+      - key: GUNICORN_WORKERS
+        value: 2
+      - key: GUNICORN_THREADS
+        value: 4
+      - key: GUNICORN_WORKER_CLASS
+        value: gthread
+    healthCheckPath: /
+    autoDeploy: true
