@@ -25,7 +25,7 @@ import { createUserWithEmailAndPassword, sendEmailVerification, serverTimestamp 
 const windowWidth = Dimensions.get('window').width;
 
 const EMAIL_DOMAINS = {
-  student: ['@aec.edu.in'],
+  student: ['@aec.edu.in','@gmail.com'],
   staff: ['@aec.edu.in', '@gmail.com'],
   admin: ['@aec.edu.in', '@gmail.com']
 };

@@ -220,7 +220,7 @@ const DashboardScreen = () => {
         (snapshot) => {
           snapshot.docChanges().forEach((change) => {
             const data = change.doc.data();
-            
+
             // Check if this record is for today
             if (data.dateStr === dateStr) {
               setTodayAttendance(data);
@@ -267,10 +267,10 @@ const DashboardScreen = () => {
       const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
         'July', 'August', 'September', 'October', 'November', 'December'];
       const monthName = monthNames[today.getMonth()];
-      
+
       // Format the date to match the database format (M/D/YYYY)
       const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
-      
+
       // Get monthly attendance records first
       const monthlyRecordsRef = db
         .collection('user_attendance')
@@ -280,7 +280,7 @@ const DashboardScreen = () => {
         .collection('records');
 
       const monthlyDocs = await monthlyRecordsRef.get();
-      
+
       let presentCount = 0;
       let absentCount = 0;
       let lateCount = 0;
@@ -290,7 +290,7 @@ const DashboardScreen = () => {
 
       monthlyDocs.forEach(doc => {
         const data = doc.data();
-        
+
         // Check if this record is for today
         if (data.dateStr === dateStr) {
           setTodayAttendance(data);
@@ -317,7 +317,7 @@ const DashboardScreen = () => {
             const [hours, minutes] = timeStr.split(':').map(Number);
             const isPM = data.timeStr.toLowerCase().includes('pm');
             let hour24 = hours;
-            
+
             if (isPM && hours !== 12) {
               hour24 = hours + 12;
             } else if (!isPM && hours === 12) {
@@ -554,7 +554,7 @@ const DashboardScreen = () => {
       const subscription = AppState.addEventListener('change', async (nextAppState) => {
         const prevState = appStateRef.current;
         const now = Date.now();
-        
+
         // Debounce app state changes
         if (now - lastAppStateChange < APP_STATE_DEBOUNCE) {
           return;
@@ -581,7 +581,7 @@ const DashboardScreen = () => {
   const refreshData = async () => {
     if (refreshing) return;
     setRefreshing(true);
-    
+
     try {
       if (!currentUser?.email) return;
 
@@ -598,7 +598,7 @@ const DashboardScreen = () => {
       if (shouldShowAttendance()) {
         await loadAttendanceData();
       }
-      
+
       setLastUpdated(new Date());
     } catch (error) {
       console.error("Error refreshing data:", error);
@@ -612,8 +612,8 @@ const DashboardScreen = () => {
     const userRole = user?.role?.toLowerCase() || '';
     const userAccess = user?.accessLevel?.toLowerCase() || '';
     return (
-      userRole === 'staff' || 
-      userRole === 'admin' || 
+      userRole === 'staff' ||
+      userRole === 'admin' ||
       userRole.includes('admin') ||
       userAccess.includes('admin')
     );
@@ -624,7 +624,7 @@ const DashboardScreen = () => {
     const userRole = user?.role?.toLowerCase() || '';
     const userAccess = user?.accessLevel?.toLowerCase() || '';
     const isSuperAdmin = userAccess.includes('super admin') || user?.email === 'kathipallimadhu@gmail.com';
-    
+
     if (userAccess.includes('admin') || userRole === 'admin' || userRole.includes('admin')) {
       return adminQuickActions.filter(action => !action.superAdminOnly || isSuperAdmin);
     } else if (userRole === 'staff') {
@@ -640,7 +640,7 @@ const DashboardScreen = () => {
       if (!taskToUpdate) return;
 
       const newStatus = taskToUpdate.status === "completed" ? "pending" : "completed";
-      
+
       await updateDoc(doc(db, "facultyTasks", taskId), {
         status: newStatus,
         updatedAt: new Date().toISOString()
@@ -658,11 +658,11 @@ const DashboardScreen = () => {
 
   const formatDate = (date) => {
     if (!date || isNaN(date.getTime())) return "No date";
-    
+
     const today = new Date();
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    
+
     if (date.toDateString() === today.toDateString()) {
       return "Today";
     } else if (date.toDateString() === tomorrow.toDateString()) {
@@ -720,32 +720,32 @@ const DashboardScreen = () => {
       const [time, period] = timeStr.split(' ');
       const [hours, minutes] = time.split(':').map(Number);
       let hour24 = hours;
-      
+
       if (period?.toLowerCase() === 'pm' && hours !== 12) {
         hour24 = hours + 12;
       } else if (period?.toLowerCase() === 'am' && hours === 12) {
         hour24 = 0;
       }
-      
+
       return `${hour24.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
     };
 
     const getStatusDisplay = (attendance) => {
       if (!attendance) return { text: 'Not Marked Yet', color: '#FF9800' };
-      
+
       if (attendance.status === 'Late') {
-        return { 
-          text: 'Present (Late)', 
+        return {
+          text: 'Present (Late)',
           color: '#FF9800',
           icon: 'clock'
         };
       }
-      
+
       const statusMap = {
         'Present': { text: 'Present', color: '#4CAF50', icon: 'check-circle' },
         'Absent': { text: 'Absent', color: '#F44336', icon: 'times-circle' }
       };
-      
+
       return statusMap[attendance.status] || { text: attendance.status, color: '#1D3557', icon: 'info-circle' };
     };
 
@@ -758,11 +758,11 @@ const DashboardScreen = () => {
           {todayAttendance ? (
             <View>
               <View style={styles.statusContainer}>
-                <Icon 
-                  name={statusInfo.icon} 
-                  size={24} 
+                <Icon
+                  name={statusInfo.icon}
+                  size={24}
                   color={statusInfo.color}
-                  style={styles.statusIcon} 
+                  style={styles.statusIcon}
                 />
                 <Text style={[styles.statusText, { color: statusInfo.color }]}>
                   {statusInfo.text}
@@ -837,11 +837,11 @@ const DashboardScreen = () => {
           ) : (
             <View>
               <View style={styles.statusContainer}>
-                <Icon 
-                  name="exclamation-circle" 
-                  size={24} 
-                  color="#FF9800" 
-                  style={styles.statusIcon} 
+                <Icon
+                  name="exclamation-circle"
+                  size={24}
+                  color="#FF9800"
+                  style={styles.statusIcon}
                 />
                 <Text style={[styles.statusText, { color: '#FF9800' }]}>
                   Not Marked Yet
@@ -875,13 +875,13 @@ const DashboardScreen = () => {
       const [time, period] = timeStr.split(' ');
       const [hours, minutes] = time.split(':').map(Number);
       let hour24 = hours;
-      
+
       if (period?.toLowerCase() === 'pm' && hours !== 12) {
         hour24 = hours + 12;
       } else if (period?.toLowerCase() === 'am' && hours === 12) {
         hour24 = 0;
       }
-      
+
       return `${hour24.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
     };
 
@@ -926,14 +926,14 @@ const DashboardScreen = () => {
                   <Text style={styles.statLabel}>Late Markings</Text>
                 </View>
                 <View style={[styles.statItem, { flex: 2 }]}>
-                  <Text style={[styles.statValue, 
-                    { color: attendanceStats.percentage >= 75 ? '#4CAF50' : '#F44336' }]}>
+                  <Text style={[styles.statValue,
+                  { color: attendanceStats.percentage >= 75 ? '#4CAF50' : '#F44336' }]}>
                     {attendanceStats.percentage.toFixed(1)}%
                   </Text>
                   <Text style={styles.statLabel}>Attendance Rate</Text>
                 </View>
               </View>
-              
+
               {/* Daily Records Summary */}
               <View style={styles.dailyRecordsContainer}>
                 <Text style={styles.dailyRecordsTitle}>Recent Records</Text>
@@ -989,7 +989,7 @@ const DashboardScreen = () => {
         if (doc.exists) {
           const data = doc.data();
           const appointmentsList = [];
-          
+
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           const tomorrow = new Date(today);
@@ -1011,13 +1011,13 @@ const DashboardScreen = () => {
               console.error("Error processing appointment:", title, error);
             }
           });
-          
+
           appointmentsList.sort((a, b) => {
             const timeA = new Date('1970/01/01 ' + a.time);
             const timeB = new Date('1970/01/01 ' + b.time);
             return timeA - timeB;
           });
-          
+
           setUpcomingAppointments(appointmentsList);
         } else {
           setUpcomingAppointments([]);
@@ -1031,7 +1031,7 @@ const DashboardScreen = () => {
   }, [currentUser?.email]);
 
   const renderAppointmentsSection = () => {
-    
+
     const renderAppointment = (appointment) => (
       <Card key={appointment.id} style={styles.appointmentCard}>
         <Card.Content>
@@ -1065,7 +1065,7 @@ const DashboardScreen = () => {
             <Text style={styles.viewAllText}>View All</Text>
           </TouchableOpacity>
         </View>
-        
+
         {upcomingAppointments && upcomingAppointments.length > 0 ? (
           <View>
             {upcomingAppointments.map(appointment => renderAppointment(appointment))}
@@ -1141,10 +1141,10 @@ const DashboardScreen = () => {
               </Text>
             </View>
             <View style={styles.headerRightContainer}>
-           
+
               <TouchableOpacity
                 style={styles.profileButton}
-                onPress={() => navigation.navigate("Profile", { 
+                onPress={() => navigation.navigate("Profile", {
                   userData: user,
                   userId: currentUser?.uid,
                   name: user?.name,
@@ -1197,7 +1197,7 @@ const DashboardScreen = () => {
                 <StatsCard />
               </>
             )}
-            
+
             <View style={styles.updateStatusContainer}>
               <View style={styles.refreshInfo}>
                 <Text style={styles.lastUpdatedText}>
@@ -1207,19 +1207,19 @@ const DashboardScreen = () => {
                   Pull down to refresh
                 </Text>
               </View>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.manualRefreshButton}
                 onPress={refreshData}
                 disabled={refreshing}
               >
-                <Icon 
-                  name={refreshing ? "spinner" : "sync"} 
-                  size={16} 
+                <Icon
+                  name={refreshing ? "spinner" : "sync"}
+                  size={16}
                   color="#457B9D"
                   style={[
                     styles.refreshIcon,
                     refreshing && styles.spinningIcon
-                  ]} 
+                  ]}
                 />
               </TouchableOpacity>
             </View>
@@ -1227,27 +1227,37 @@ const DashboardScreen = () => {
             {/* Quick Actions Grid */}
             <Text style={styles.sectionTitle}>Quick Actions</Text>
             <View style={styles.actionsGrid}>
-              {getQuickActions().map((action) => (
-                <TouchableOpacity
-                  key={action.id}
-                  style={[styles.actionCard, { backgroundColor: action.bgColor }]}
-                  onPress={() => {
-                    if (action.route === 'UserAccessManagement') {
-                      navigation.navigate(action.route, {
-                        userAccess: user.accessLevel || 'Basic Admin'
-                      });
-                    } else if (action.route === 'MarkAttendance') {
-                      handleAttendanceNavigation();
-                    } else {
-                      navigation.navigate(action.route, action.params);
-                    }
-                  }}
-                >
-                  <Icon name={action.icon} size={24} color="#fff" />
-                  <Text style={styles.actionText}>{action.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+  {getQuickActions().map((action) => {
+    // Skip rendering if it's a super admin only action and user isn't super admin
+    const isSuperAdmin = user?.accessLevel?.toLowerCase() === 'super admin' || 
+                        user?.email === 'kathipallimadhu@gmail.com';
+    
+    if (action.superAdminOnly && !isSuperAdmin) {
+      return null;
+    }
+
+    return (
+      <TouchableOpacity
+        key={action.id}
+        style={[styles.actionCard, { backgroundColor: action.bgColor }]}
+        onPress={() => {
+          if (action.route === 'UserAccessManagement') {
+            navigation.navigate('UserAccessManagement', {
+              userAccess: user.accessLevel || 'Basic Admin'
+            });
+          } else if (action.route === 'MarkAttendance') {
+            handleAttendanceNavigation();
+          } else {
+            navigation.navigate(action.route, action.params);
+          }
+        }}
+      >
+        <Icon name={action.icon} size={24} color="#fff" />
+        <Text style={styles.actionText}>{action.label}</Text>
+      </TouchableOpacity>
+    );
+  })}
+</View>
 
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Today's Tasks</Text>
@@ -1256,14 +1266,14 @@ const DashboardScreen = () => {
             <View style={styles.tasksContainer}>
               {todayTasks.length > 0 ? (
                 todayTasks.map((item) => (
-                  <View 
+                  <View
                     key={item.id}
                     style={[
                       styles.taskItem,
                       item.completed && styles.completedTaskItem
                     ]}
                   >
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       onPress={() => toggleTaskCompletion(item.id)}
                       style={styles.taskCheckbox}
                     >
@@ -1313,13 +1323,13 @@ const DashboardScreen = () => {
                 </View>
               )}
             </View>
-            
+
             {renderAppointmentsSection()}
 
             {/* Announcements */}
             <Text style={styles.sectionTitle}>Announcements</Text>
-            <ScrollView 
-              horizontal 
+            <ScrollView
+              horizontal
               showsHorizontalScrollIndicator={false}
               nestedScrollEnabled={true}
               style={styles.horizontalScroll}
@@ -1409,8 +1419,8 @@ const styles = StyleSheet.create({
   profileButton: {
     padding: 8,
     borderRadius: 30,
-    width:52,
-    height:52,
+    width: 52,
+    height: 52,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',

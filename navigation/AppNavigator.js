@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import LoginScreen from '../screens/Auth/LoginScreen';
 import SignupScreen from '../screens/Auth/SignupScreen';
@@ -23,6 +23,10 @@ import Results from '../screens/student/ResultsSccreen';
 import AttendanceSettings from '../screens/Admin/AttendanceSettings';
 
 const Stack = createNativeStackNavigator();
+
+// Valid roles configuration
+const VALID_ROLES = ['student', 'staff', 'admin'];
+const DEFAULT_ROLE = 'student';
 
 // Common screens configuration shared between roles
 const commonScreens = [
@@ -70,6 +74,25 @@ const commonScreens = [
     name: "ViewLocations",
     component: ViewLocationsScreen,
     options: { headerShown: true, title: 'All Locations' }
+  },
+  {
+    name: "MarkAttendance",
+    component: Attendance_fig_cam,
+    options: { headerShown: true, title: 'Mark Attendance' }
+  },
+  {
+    name: "AttendanceSettings",
+    component: AttendanceSettings,
+    options: { headerShown: true, title: 'Attendance Settings' }
+  },
+  {
+    name: "UserAccessManagement",
+    component: UserAccessManagement,
+    options: { 
+      headerShown: true, 
+      title: 'User Access Management',
+      headerBackTitleVisible: false
+    }
   }
 ];
 
@@ -88,17 +111,20 @@ const authScreens = [
   {
     name: "StudentSignup",
     component: SignupScreen,
-    initialParams: { userType: 'student' }
+    initialParams: { userType: 'student' },
+    options: { headerShown: false }
   },
   {
     name: "StaffSignup",
     component: SignupScreen,
-    initialParams: { userType: 'staff' }
+    initialParams: { userType: 'staff' },
+    options: { headerShown: false }
   },
   {
     name: "AdminSignup",
     component: SignupScreen,
-    initialParams: { userType: 'admin' }
+    initialParams: { userType: 'admin' },
+    options: { headerShown: false }
   }
 ];
 
@@ -123,8 +149,13 @@ const roleSpecificScreens = {
       options: { headerShown: false }
     },
     {
-      name: "MarkAttendance",
-      component: Attendance_fig_cam,
+      name: "StaffAttendanceTracker",
+      component: StaffAttendanceTracker,
+      options: { headerShown: true }
+    },
+    {
+      name: "StaffLocationTracker",
+      component: StaffLocationTracker,
       options: { headerShown: true }
     }
   ],
@@ -135,19 +166,14 @@ const roleSpecificScreens = {
       options: { headerShown: false }
     },
     {
-      name: "UserAccessManagement",
-      component: UserAccessManagement,
-      options: { headerShown: true, title: 'User Access Management' }
-    },
-    {
-      name: "MarkAttendance",
-      component: Attendance_fig_cam,
+      name: "StaffAttendanceTracker",
+      component: StaffAttendanceTracker,
       options: { headerShown: true }
     },
     {
-      name: "AttendanceSettings",
-      component: AttendanceSettings,
-      options: { headerShown: true, title: 'Attendance Settings' }
+      name: "StaffLocationTracker",
+      component: StaffLocationTracker,
+      options: { headerShown: true }
     }
   ]
 };
@@ -166,33 +192,78 @@ const faceCaptureScreen = {
   }
 };
 
+const validateRole = (role) => {
+  if (!role || typeof role !== 'string') return DEFAULT_ROLE;
+  const normalizedRole = role.toLowerCase();
+  return VALID_ROLES.includes(normalizedRole) ? normalizedRole : DEFAULT_ROLE;
+};
+
+const debugNavigation = (screens, initialRoute, userRole) => {
+  const screenNames = screens.map(s => s.name);
+  if (!screenNames.includes(initialRoute)) {
+    console.error('[NAVIGATION ERROR] Initial route not in available screens:', {
+      initialRoute,
+      availableScreens: screenNames,
+      userRole
+    });
+    return false;
+  }
+  return true;
+};
+
 export default function AppNavigator({ isLoggedIn, userRole }) {
   console.log('[DEBUG] AppNavigator render:', { isLoggedIn, userRole });
 
-  const getScreens = () => {
-    if (!isLoggedIn) {
-      return [...authScreens, faceCaptureScreen];
-    }
+  const { screens, initialRoute } = useMemo(() => {
+    const getScreens = () => {
+      if (!isLoggedIn) {
+        return [...authScreens, faceCaptureScreen];
+      }
 
-    const normalizedRole = userRole?.toLowerCase() || 'student';
-    const roleScreens = roleSpecificScreens[normalizedRole] || roleSpecificScreens['student'];
-    return [...roleScreens, ...commonScreens, faceCaptureScreen];
-  };
+      const validRole = validateRole(userRole);
+      console.log('[DEBUG] Validated role:', { original: userRole, validated: validRole });
+      
+      const roleScreens = roleSpecificScreens[validRole] || [];
+      
+      // Combine screens ensuring no duplicates
+      const allScreens = [...roleScreens, ...commonScreens, faceCaptureScreen];
+      const uniqueScreens = allScreens.filter(
+        (screen, index, self) => index === self.findIndex((s) => s.name === screen.name)
+      );
+      
+      return uniqueScreens;
+    };
 
-  const getInitialRoute = () => {
-    if (!isLoggedIn) {
-      return 'Login';
-    }
-    const normalizedRole = userRole?.toLowerCase() || 'student';
-    return `${normalizedRole.charAt(0).toUpperCase() + normalizedRole.slice(1)}Dashboard`;
-  };
+    const getInitialRoute = () => {
+      if (!isLoggedIn) return 'Login';
+      
+      const validRole = validateRole(userRole);
+      const dashboardScreen = `${validRole.charAt(0).toUpperCase() + validRole.slice(1)}Dashboard`;
+      
+      // Check if dashboard screen exists for this role
+      const roleHasDashboard = roleSpecificScreens[validRole]?.some(
+        s => s.name === dashboardScreen
+      );
+      
+      return roleHasDashboard ? dashboardScreen : 'Profile';
+    };
 
-  const screens = getScreens();
-  const initialRoute = getInitialRoute();
+    const screens = getScreens();
+    const initialRoute = getInitialRoute();
+    
+    return { screens, initialRoute };
+  }, [isLoggedIn, userRole]);
+
+  // Validate navigation setup
+  if (!debugNavigation(screens, initialRoute, userRole)) {
+    const fallbackRoute = isLoggedIn ? 'Profile' : 'Login';
+    console.warn(`[NAVIGATION WARNING] Falling back to ${fallbackRoute} due to invalid initial route for role: ${userRole}`);
+  }
 
   console.log('[DEBUG] Navigation setup:', {
     isLoggedIn,
     userRole,
+    validatedRole: validateRole(userRole),
     initialRoute,
     availableScreens: screens.map(s => s.name)
   });

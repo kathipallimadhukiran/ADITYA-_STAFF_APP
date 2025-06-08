@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,9 @@ import {
   Dimensions,
   Linking,
   Platform,
+  Image,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Card } from 'react-native-paper';
 import { firebase } from '../../services/Firebase/firebaseConfig';
@@ -28,6 +31,8 @@ export default function ViewLocationsScreen() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
+  const rotationAnim = useRef(new Animated.Value(0)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
 
   const getLocationName = async (latitude, longitude) => {
     try {
@@ -135,7 +140,8 @@ export default function ViewLocationsScreen() {
           name: userData.name || 'Unknown User',
           email: userData.email,
           role: userData.role,
-          department: dept
+          department: dept,
+          profilePhoto: userData.profilePhoto || null
         });
       });
 
@@ -153,6 +159,45 @@ export default function ViewLocationsScreen() {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  useEffect(() => {
+    const startAnimations = () => {
+      // Rotation animation
+      Animated.loop(
+        Animated.timing(rotationAnim, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+
+      // Opacity animation
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(opacityAnim, {
+            toValue: 1,
+            duration: 1000,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacityAnim, {
+            toValue: 0.3,
+            duration: 1000,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          })
+        ])
+      ).start();
+    };
+
+    startAnimations();
+  }, []);
+
+  const spin = rotationAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg']
+  });
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -288,8 +333,42 @@ export default function ViewLocationsScreen() {
                 <Card style={styles.userCard}>
                   <Card.Content>
                     <View style={styles.userInfo}>
-                      <Text style={styles.userName}>{user.name}</Text>
-                      <Text style={styles.userRole}>{user.role.toUpperCase()}</Text>
+                      <View style={styles.userBasicInfo}>
+                        <View style={styles.avatarContainer}>
+                          {user.profilePhoto ? (
+                            <Image
+                              source={{ uri: user.profilePhoto }}
+                              style={styles.userAvatar}
+                            />
+                          ) : (
+                            <View style={[styles.userAvatar, styles.defaultAvatar]}>
+                              <Icon name="user" size={20} color="#457B9D" />
+                            </View>
+                          )}
+                          <Animated.View 
+                            style={[
+                              styles.statusStroke,
+                              {
+                                opacity: opacityAnim,
+                                transform: [{ rotate: spin }]
+                              }
+                            ]} 
+                          />
+                          <Animated.View 
+                            style={[
+                              styles.statusStrokeGlow,
+                              {
+                                opacity: opacityAnim,
+                              }
+                            ]} 
+                          />
+                        </View>
+                        <View style={styles.userTextInfo}>
+                          <Text style={styles.userName}>{user.name}</Text>
+                          <Text style={styles.userRole}>{user.role.toUpperCase()}</Text>
+                        </View>
+                      </View>
+                      <Icon name="chevron-right" size={16} color="#6C757D" />
                     </View>
                   </Card.Content>
                 </Card>
@@ -318,8 +397,38 @@ export default function ViewLocationsScreen() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <View style={styles.headerLeft}>
-                <Text style={styles.modalTitle}>{selectedUser.name}</Text>
-                <View style={[styles.statusIndicator, { backgroundColor: lastUpdate.color }]} />
+                <View style={styles.modalAvatarContainer}>
+                  {selectedUser.profilePhoto ? (
+                    <Image
+                      source={{ uri: selectedUser.profilePhoto }}
+                      style={styles.modalAvatar}
+                    />
+                  ) : (
+                    <View style={[styles.modalAvatar, styles.defaultAvatar]}>
+                      <Icon name="user" size={24} color="#457B9D" />
+                    </View>
+                  )}
+                  <Animated.View 
+                    style={[
+                      styles.modalStatusStroke,
+                      {
+                        opacity: opacityAnim,
+                        transform: [{ rotate: spin }]
+                      }
+                    ]} 
+                  />
+                  <Animated.View 
+                    style={[
+                      styles.modalStatusStrokeGlow,
+                      {
+                        opacity: opacityAnim,
+                      }
+                    ]} 
+                  />
+                </View>
+                <View style={styles.headerTextContainer}>
+                  <Text style={styles.modalTitle}>{selectedUser.name}</Text>
+                </View>
               </View>
               <TouchableOpacity 
                 onPress={() => setModalVisible(false)}
@@ -516,6 +625,120 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  userBasicInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 12,
+  },
+  userAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  modalAvatarContainer: {
+    position: 'relative',
+    marginRight: 16,
+  },
+  modalAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+  },
+  statusStroke: {
+    position: 'absolute',
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: '#28A745',
+    borderStyle: 'solid',
+  },
+  statusStrokeGlow: {
+    position: 'absolute',
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: '#28A745',
+    shadowColor: '#28A745',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  modalStatusStroke: {
+    position: 'absolute',
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: '#28A745',
+    borderStyle: 'solid',
+  },
+  modalStatusStrokeGlow: {
+    position: 'absolute',
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: '#28A745',
+    shadowColor: '#28A745',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  statusDots: {
+    position: 'absolute',
+    top: -6,
+    left: -6,
+    right: -6,
+    bottom: -6,
+    borderRadius: 26,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    transform: [{ rotate: '45deg' }],
+  },
+  modalStatusDots: {
+    position: 'absolute',
+    top: -6,
+    left: -6,
+    right: -6,
+    bottom: -6,
+    borderRadius: 36,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    transform: [{ rotate: '45deg' }],
+  },
+  statusDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#28A745',
+    opacity: 0.8,
+  },
+  defaultAvatar: {
+    backgroundColor: '#E9ECEF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userTextInfo: {
+    flex: 1,
+  },
   userName: {
     fontSize: 16,
     color: '#1D3557',
@@ -524,6 +747,15 @@ const styles = StyleSheet.create({
   userRole: {
     fontSize: 12,
     color: '#457B9D',
+    marginTop: 2,
+  },
+  headerTextContainer: {
+    flex: 1,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   modalOverlay: {
     flex: 1,
@@ -544,16 +776,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusIndicator: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginLeft: 10,
   },
   modalTitle: {
     fontSize: 24,

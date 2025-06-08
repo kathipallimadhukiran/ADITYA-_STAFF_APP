@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -21,161 +21,126 @@ import {
   serverTimestamp,
   where 
 } from 'firebase/firestore';
-import { useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 
-const UserAccessManagement = () => {
-  const route = useRoute();
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [currentUserAccess, setCurrentUserAccess] = useState(route.params?.userAccess || 'Basic Admin');
-
-  // Define access levels based on admin type
-  const accessLevelHierarchy = {
-    'Super Admin': {
+// Define access levels hierarchy outside component for better performance
+const ACCESS_LEVEL_HIERARCHY = {
+  'Super Admin': {
+    canView: ['admin', 'staff', 'student'],
+    canModify: {
       admin: ['Super Admin', 'Department Admin', 'Basic Admin'],
       staff: ['Head of Department', 'Senior Staff', 'Junior Staff'],
       student: ['Class Representative', 'Student Council', 'Regular Student'],
-    },
-    'Department Admin': {
+    }
+  },
+  'Department Admin': {
+    canView: ['staff', 'student'],
+    canModify: {
       staff: ['Head of Department', 'Senior Staff', 'Junior Staff'],
       student: ['Class Representative', 'Student Council', 'Regular Student'],
-    },
-    'Basic Admin': {
+    }
+  },
+  'Basic Admin': {
+    canView: ['student'],
+    canModify: {
       student: ['Class Representative', 'Student Council', 'Regular Student'],
     }
-  };
+  }
+};
+
+export default function UserAccessManagement() {
+  const navigation = useNavigation();
+  const route = useRoute();
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const currentUserAccess = route.params?.userAccess || 'Basic Admin';
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Get the viewable roles for current admin level
+      const viewableRoles = ACCESS_LEVEL_HIERARCHY[currentUserAccess]?.canView || [];
+      
+      if (viewableRoles.length === 0) {
+        setUsers([]);
+        setLoading(false);
+        return;
+      }
+
+      // Create query based on viewable roles
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('role', 'in', viewableRoles)
+      );
+
+      const usersSnapshot = await getDocs(usersQuery);
+      const usersList = usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        uniqueId: `${doc.id}_${doc.data().email || Math.random().toString(36).substr(2, 9)}`,
+        ...doc.data()
+      }));
+
+      setUsers(usersList);
+    } catch (err) {
+      console.error('Error fetching users:', err);
+      setError('Failed to load users. Please try again.');
+      Alert.alert('Error', 'Failed to load users');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentUserAccess]);
 
   useEffect(() => {
     fetchUsers();
-  }, []);
-
-  const fetchUsers = async () => {
-    try {
-      console.log('Starting to fetch users...');
-      console.log('Current user access level:', currentUserAccess);
-      
-      const usersCollection = collection(db, 'users');
-      let usersQuery;
-
-      // For Department Admin, only fetch staff and students
-      if (currentUserAccess === 'Department Admin') {
-        usersQuery = query(
-          usersCollection,
-          where('role', 'in', ['staff', 'student'])
-        );
-      } else {
-        usersQuery = collection(db, 'users');
-      }
-
-      const usersSnapshot = await getDocs(usersQuery);
-      console.log('Total users found:', usersSnapshot.size);
-      
-      const usersList = usersSnapshot.docs.map(doc => {
-        const data = doc.data();
-        console.log('Processing user document:', doc.id, data);
-        return {
-          id: doc.id,
-          uniqueId: doc.id + '_' + (data.email || Math.random().toString(36).substr(2, 9)),
-          ...data,
-        };
-      });
-
-      // Filter users based on admin level
-      const filteredUsers = usersList.filter(user => {
-        switch(currentUserAccess) {
-          case 'Super Admin':
-            return true; // Can see all users
-          case 'Department Admin':
-            // Can only see staff and students
-            return user.role === 'staff' || user.role === 'student';
-          case 'Basic Admin':
-            return user.role === 'student'; // Can only see students
-          default:
-            return false;
-        }
-      });
-
-      console.log('Filtered users to display:', filteredUsers);
-      setUsers(filteredUsers);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      Alert.alert('Error', 'Failed to load users');
-      setLoading(false);
-    }
-  };
+  }, [fetchUsers]);
 
   const getAvailableAccessLevels = (userRole) => {
-    const adminType = currentUserAccess;
-    const hierarchy = accessLevelHierarchy[adminType];
-    
-    if (!hierarchy) return [];
-    
-    // If the user is an admin, check admin hierarchy
-    if (userRole === 'admin') {
-      return adminType === 'Super Admin' ? hierarchy.admin : [];
-    }
-    
-    // Return appropriate levels based on user role and admin type
-    return hierarchy[userRole] || [];
+    return ACCESS_LEVEL_HIERARCHY[currentUserAccess]?.canModify[userRole] || [];
   };
 
   const updateUserAccess = async (userId, newAccessLevel, userEmail) => {
     try {
-      console.log('Attempting to update access level for user:', userId);
-      console.log('Using email as document ID:', userEmail);
-      console.log('New access level:', newAccessLevel);
+      setLoading(true);
       
       const documentId = userEmail || userId;
       const userRef = doc(db, 'users', documentId);
       
-      // First verify the user exists
+      // Verify user exists and get current data
       const userDoc = await getDoc(userRef);
       if (!userDoc.exists()) {
-        console.log('User document not found:', documentId);
-        Alert.alert('Error', 'User not found. Please ensure the user has registered and try again.');
-        return;
+        throw new Error('User not found');
       }
 
-      // Get user data
       const userData = userDoc.data();
+      const availableLevels = getAvailableAccessLevels(userData.role);
 
-      // Additional checks for Department Admin
-      if (currentUserAccess === 'Department Admin') {
-        // Ensure they can only modify staff and student access levels
-        if (userData.role === 'admin') {
-          Alert.alert('Error', 'Department Admins cannot modify admin access levels');
-          return;
-        }
-
-        // Verify the new access level is allowed for the user's role
-        const availableLevels = getAvailableAccessLevels(userData.role);
-        if (!availableLevels.includes(newAccessLevel)) {
-          Alert.alert('Error', 'You do not have permission to set this access level');
-          return;
-        }
+      // Validate the new access level is allowed
+      if (!availableLevels.includes(newAccessLevel)) {
+        throw new Error('You do not have permission to set this access level');
       }
 
-      // Update access level for existing user
-      try {
-        await updateDoc(userRef, {
-          accessLevel: newAccessLevel,
-          lastUpdated: serverTimestamp()
-        });
-        console.log('Successfully updated access level for user:', documentId);
-        Alert.alert('Success', 'User access level updated successfully');
-        fetchUsers(); // Refresh the list
-      } catch (error) {
-        console.error('Error updating user access:', error);
-        Alert.alert('Error', 'Failed to update user access level');
-      }
+      // Update the user's access level
+      await updateDoc(userRef, {
+        accessLevel: newAccessLevel,
+        lastUpdated: serverTimestamp()
+      });
+
+      // Refresh the user list
+      await fetchUsers();
+      
+      Alert.alert('Success', 'User access level updated successfully');
     } catch (error) {
-      console.error('Error in updateUserAccess:', error);
-      Alert.alert('Error', 'An unexpected error occurred');
+      console.error('Error updating user access:', error);
+      Alert.alert('Error', error.message || 'Failed to update user access level');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const UserCard = ({ user }) => {
+  const UserCard = React.memo(({ user }) => {
     const [showAccessLevels, setShowAccessLevels] = useState(false);
     const availableAccessLevels = getAvailableAccessLevels(user.role);
 
@@ -188,22 +153,28 @@ const UserAccessManagement = () => {
               <Text style={styles.userEmail}>{user.email || user.id}</Text>
               <Text style={styles.userRole}>{user.role || 'No Role'}</Text>
               <Text style={styles.accessLevel}>
-                Access Level: {user.accessLevel || 'Not Set'}
+                Current Access: {user.accessLevel || 'Not Set'}
               </Text>
             </View>
+            
             {availableAccessLevels.length > 0 && (
               <TouchableOpacity
                 style={styles.accessButton}
                 onPress={() => setShowAccessLevels(!showAccessLevels)}
+                disabled={loading}
               >
-                <Icon name="user-shield" size={20} color="#1D3557" />
+                <Icon 
+                  name="user-shield" 
+                  size={20} 
+                  color={loading ? '#ccc' : '#1D3557'} 
+                />
               </TouchableOpacity>
             )}
           </View>
 
           {showAccessLevels && availableAccessLevels.length > 0 && (
             <View style={styles.accessLevelsContainer}>
-              <Text style={styles.accessLevelTitle}>Access Levels:</Text>
+              <Text style={styles.accessLevelTitle}>Set Access Level:</Text>
               {availableAccessLevels.map((level) => (
                 <TouchableOpacity
                   key={level}
@@ -212,6 +183,7 @@ const UserAccessManagement = () => {
                     user.accessLevel === level && styles.selectedLevel,
                   ]}
                   onPress={() => updateUserAccess(user.id, level, user.email)}
+                  disabled={loading}
                 >
                   <Text style={[
                     styles.accessLevelText,
@@ -226,9 +198,9 @@ const UserAccessManagement = () => {
         </Card.Content>
       </Card>
     );
-  };
+  });
 
-  if (loading) {
+  if (loading && users.length === 0) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#1D3557" />
@@ -236,19 +208,42 @@ const UserAccessManagement = () => {
     );
   }
 
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity 
+          style={styles.retryButton}
+          onPress={fetchUsers}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>User Access Management</Text>
-      <Text style={styles.subtitle}>Your Access Level: {currentUserAccess}</Text>
+      <Text style={styles.subtitle}>
+        Your Access Level: {currentUserAccess}
+        {loading && ' (Updating...)'}
+      </Text>
+      
       <FlatList
         data={users}
         renderItem={({ item }) => <UserCard user={item} />}
-        keyExtractor={(item) => item.uniqueId || item.id + '_' + Date.now()}
+        keyExtractor={(item) => item.uniqueId}
         contentContainerStyle={styles.listContainer}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>No users found for your access level</Text>
+        }
+        refreshing={loading}
+        onRefresh={fetchUsers}
       />
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -272,6 +267,34 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#F94144',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#1D3557',
+    padding: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#6c757d',
+    marginTop: 20,
+    fontSize: 16,
   },
   listContainer: {
     paddingBottom: 20,
@@ -345,5 +368,3 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
-
-export default UserAccessManagement; 
