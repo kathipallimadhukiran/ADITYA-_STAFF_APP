@@ -1,0 +1,101 @@
+{
+  "expo": {
+    "name": "ADITYA-APP",
+    "slug": "ADITYA-APP",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "owner": "madhukiranyt12",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you share them with your friends.",
+          "cameraPermission": "The app accesses your camera to let you take profile photos."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location for attendance tracking.",
+          "locationAlwaysPermission": "Allow $(PRODUCT_NAME) to use your location in the background for attendance tracking.",
+          "locationWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ]
+    ],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.adityaapp.tracking",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to let you take profile photos.",
+        "NSPhotoLibraryUsageDescription": "This app uses the photo library to let you choose profile photos.",
+        "NSPhotoLibraryAddUsageDescription": "This app needs access to save photos to your library.",
+        "NSLocationWhenInUseUsageDescription": "Allow $(PRODUCT_NAME) to use your location.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow $(PRODUCT_NAME) to use your location for attendance tracking.",
+        "NSLocationAlwaysUsageDescription": "Allow $(PRODUCT_NAME) to use your location in the background for attendance tracking.",
+        "UIBackgroundModes": [
+          "location",
+          "fetch",
+          "processing"
+        ]
+      },
+      "config": {
+        "googleMapsApiKey": "YOUR_IOS_API_KEY"
+      }
+    },
+    "android": {
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "WAKE_LOCK",
+        "RECEIVE_BOOT_COMPLETED"
+      ],
+      "package": "com.adityaapp.tracking",
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "allowBackgroundLocationUpdates": true,
+      "foregroundService": {
+        "name": "Location Tracking",
+        "notificationTitle": "Location Tracking Active",
+        "notificationBody": "Your location is being tracked",
+        "notificationColor": "#FF231F7C"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_ANDROID_API_KEY"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "fbe6932d-271a-43ed-b6bb-706303a0a7a7"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/fbe6932d-271a-43ed-b6bb-706303a0a7a7"
+    }
+  }
+}
