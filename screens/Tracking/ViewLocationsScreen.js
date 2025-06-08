@@ -10,6 +10,8 @@ import {
   Modal,
   TextInput,
   Dimensions,
+  Linking,
+  Platform,
 } from 'react-native';
 import { Card } from 'react-native-paper';
 import { firebase } from '../../services/Firebase/firebaseConfig';
@@ -227,6 +229,30 @@ export default function ViewLocationsScreen() {
     }
   };
 
+  // Function to open location in maps
+  const openInMaps = (latitude, longitude) => {
+    const scheme = Platform.select({
+      ios: 'maps:',
+      android: 'geo:'
+    });
+    const latLng = `${latitude},${longitude}`;
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${latLng}`;
+    const mapsUrl = Platform.select({
+      ios: `${scheme}${latLng}`,
+      android: `${scheme}${latLng}`
+    });
+
+    // Try to open in Google Maps first, fallback to native maps
+    Linking.canOpenURL(googleMapsUrl)
+      .then(supported => {
+        if (supported) {
+          return Linking.openURL(googleMapsUrl);
+        }
+        return Linking.openURL(mapsUrl);
+      })
+      .catch(err => console.error('Error opening maps:', err));
+  };
+
   const renderDepartmentItem = ({ item: department }) => {
     const departmentUsers = users[department] || [];
     const filteredUsers = searchQuery
@@ -353,6 +379,14 @@ export default function ViewLocationsScreen() {
                           Altitude: {selectedUser.altitude.toFixed(2)}m
                         </Text>
                       </View>
+
+                      <TouchableOpacity 
+                        style={styles.mapsButton}
+                        onPress={() => openInMaps(selectedUser.latitude, selectedUser.longitude)}
+                      >
+                        <Icon name="directions" size={16} color="#FFFFFF" />
+                        <Text style={styles.mapsButtonText}>Open in Maps</Text>
+                      </TouchableOpacity>
 
                       <View style={styles.updateInfo}>
                         <Icon 
@@ -612,5 +646,21 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     paddingBottom: 16,
+  },
+  mapsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#457B9D',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  mapsButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 }); 
