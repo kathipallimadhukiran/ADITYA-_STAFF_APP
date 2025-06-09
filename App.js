@@ -108,11 +108,34 @@ function AppContent() {
     return () => unsubscribe();
   }, [setUser]);
 
-  const navigationState = useMemo(() => ({
-    isLoggedIn: !!user,
-    userRole: user?.role,
-    isReady: isReady
-  }), [user, isReady]);
+  const navigationState = useMemo(() => {
+    console.log('[DEBUG] Navigation state computed:', {
+      state: {
+        isLoggedIn: !!user,
+        isReady,
+        userRole: user?.role
+      },
+      user: {
+        email: user?.email,
+        role: user?.role
+      }
+    });
+    return {
+      isLoggedIn: !!user,
+      userRole: user?.role,
+      isReady
+    };
+  }, [user?.role, user?.email, isReady]);
+
+  useEffect(() => {
+    if (user) {
+      console.log('[DEBUG] User state updated:', { 
+        email: user.email, 
+        role: user.role,
+        isLoggedIn: !!user 
+      });
+    }
+  }, [user]);
 
   if (!isReady) {
     return null;

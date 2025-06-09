@@ -12,20 +12,17 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
   ActivityIndicator,
-  Modal,
-  Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { firebase } from '../../services/Firebase/firebaseConfig';
-import { saveUser, isEmailAuthorized, validateAdminCode, createOrUpdateUser } from '../../services/Firebase/firestoreService';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { saveUser, isEmailAuthorized, validateAdminCode } from '../../services/Firebase/firestoreService';
+import { useNavigation, useRoute, CommonActions } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { createUserWithEmailAndPassword, sendEmailVerification, serverTimestamp } from 'firebase/auth';
 
 const windowWidth = Dimensions.get('window').width;
 
 const EMAIL_DOMAINS = {
-  student: ['@aec.edu.in','@gmail.com'],
+  student: ['@aec.edu.in'],
   staff: ['@aec.edu.in', '@gmail.com'],
   admin: ['@aec.edu.in', '@gmail.com']
 };
@@ -46,7 +43,6 @@ export default function SignupScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [showFaceModal, setShowFaceModal] = useState(false);
 
   const isValidEmail = (email) => {
     const lowerEmail = email.toLowerCase();
@@ -68,81 +64,7 @@ export default function SignupScreen() {
     }
   };
 
-  const handleSignup = async () => {
-    if (!validateForm()) {
-      return;
-    }
-
-    setLoading(true);
-    try {
-      // Create Firebase Auth user
-      const userCredential = await createUserWithEmailAndPassword(firebase.auth(), email.toLowerCase(), password);
-      const user = userCredential.user;
-
-      // Create user document in Firestore
-      const userData = {
-        email: email.toLowerCase(),
-        name,
-        phoneNumber,
-        role: userType,
-        department: '',
-        createdAt: serverTimestamp(),
-        accessLevel: userType === 'admin' ? 'Basic Admin' : userType,
-        verified: false,
-        profilePhoto: '',
-        bio: '',
-        emergencyContact: '',
-        qualifications: []
-      };
-
-      await createOrUpdateUser(userData);
-
-      // Send email verification
-      await sendEmailVerification(user);
-
-      Alert.alert(
-        'Success',
-        'Account created successfully! Please verify your email before logging in.',
-        [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
-      );
-    } catch (error) {
-      console.error('Signup error:', error);
-      let errorMessage = 'An error occurred during signup';
-      
-      if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'This email is already registered';
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'Invalid email address';
-      } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'Password should be at least 6 characters';
-      }
-      
-      Alert.alert('Signup Failed', errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFaceCapture = () => {
-    setShowFaceModal(false);
-    navigation.navigate('FaceCaptureScreen', { email });
-  };
-
-  const handleSkipFaceCapture = () => {
-    setShowFaceModal(false);
-    // Clear form fields
-    setEmail('');
-    setPassword('');
-    setConfirmPassword('');
-    setName('');
-    setPhoneNumber('');
-    setUserId('');
-
-    // Navigate back to login
-    navigation.navigate('Login');
-  };
-
-  const validateForm = () => {
+  const handleSignup = useCallback(async () => {
     const trimmedName = name.trim();
     const trimmedEmail = email.trim();
     const trimmedPassword = password.trim();
@@ -156,35 +78,90 @@ export default function SignupScreen() {
     if (!trimmedName || !trimmedEmail || !trimmedPassword || !trimmedConfirmPassword || !trimmedPhone || !trimmedUserId) {
       setMessageType('error');
       setMessage('Please fill in all required fields.');
-      return false;
+      return;
     }
 
     if (!isValidEmail(trimmedEmail)) {
       setMessageType('error');
       setMessage(`Email must be a valid ${userType} email (${EMAIL_DOMAINS[userType].join(', ')}).`);
-      return false;
+      return;
     }
 
     if (!isValidPhoneNumber(trimmedPhone)) {
       setMessageType('error');
       setMessage('Please enter a valid 10-digit phone number.');
-      return false;
+      return;
     }
 
     if (trimmedPassword !== trimmedConfirmPassword) {
       setMessageType('error');
       setMessage('Passwords do not match.');
-      return false;
+      return;
     }
 
     if (userType === 'admin' && !validateAdminCode(trimmedUserId)) {
       setMessageType('error');
       setMessage('Invalid admin code.');
-      return false;
+      return;
     }
 
-    return true;
-  };
+    setLoading(true);
+
+    try {
+      // Check if the email is authorized
+      const isAuthorized = await isEmailAuthorized(trimmedEmail, userType);
+      if (!isAuthorized) {
+        setMessageType('error');
+        setMessage(`This email is not authorized for ${userType} registration. Please contact your administrator.`);
+        setLoading(false);
+        return;
+      }
+
+      const userCredential = await firebase.auth().createUserWithEmailAndPassword(trimmedEmail, trimmedPassword);
+      await userCredential.user.sendEmailVerification();
+      await saveUser(trimmedEmail, trimmedName, trimmedUserId, trimmedPhone, userType);
+
+      setMessageType('success');
+      setMessage('Registered! Please check your email for verification.');
+
+      // Sign out the newly created user immediately
+      await firebase.auth().signOut();
+
+      // Clear form fields
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+      setName('');
+      setPhoneNumber('');
+      setUserId('');
+
+      // Reset to root navigator and navigate to Login
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        })
+      );
+
+    } catch (error) {
+      let friendlyMessage = error.message;
+      switch (error.code) {
+        case 'auth/email-already-in-use':
+          friendlyMessage = 'This email is already registered.';
+          break;
+        case 'auth/invalid-email':
+          friendlyMessage = 'Invalid email format.';
+          break;
+        case 'auth/weak-password':
+          friendlyMessage = 'Password should be at least 6 characters.';
+          break;
+      }
+      setMessageType('error');
+      setMessage(friendlyMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, [name, email, password, confirmPassword, phoneNumber, userId, userType, navigation]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -294,25 +271,6 @@ export default function SignupScreen() {
                 {message}
               </Text>
             ) : null}
-
-            <Modal visible={showFaceModal} transparent animationType="slide" onRequestClose={() => setShowFaceModal(false)}>
-              <View style={styles.modalContainer}>
-                <View style={styles.modalContent}>
-                  <Text style={styles.modalTitle}>Face Capture</Text>
-                  <Text style={styles.modalText}>
-                    Please capture your face for attendance or skip to go to Login page.
-                  </Text>
-
-                  <TouchableOpacity style={styles.modalButtonPrimary} onPress={handleFaceCapture}>
-                    <Text style={styles.modalButtonText}>Capture Face</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.modalButtonSecondary} onPress={handleSkipFaceCapture}>
-                    <Text style={styles.modalButtonText}>Skip</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </Modal>
           </ScrollView>
         </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
@@ -429,47 +387,5 @@ const styles = StyleSheet.create({
   },
   success: {
     color: '#16a34a',
-  },
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    padding: 30,
-  },
-  modalContent: {
-    backgroundColor: '#fff7ed',
-    borderRadius: 20,
-    padding: 25,
-    alignItems: 'center',
-  },
-  modalTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 15,
-    color: '#ea580c',
-  },
-  modalText: {
-    fontSize: 16,
-    marginBottom: 25,
-    color: '#4b5563',
-    textAlign: 'center',
-  },
-  modalButtonPrimary: {
-    backgroundColor: '#f97316',
-    paddingVertical: 14,
-    paddingHorizontal: 45,
-    borderRadius: 12,
-    marginBottom: 15,
-  },
-  modalButtonSecondary: {
-    backgroundColor: '#6b7280',
-    paddingVertical: 14,
-    paddingHorizontal: 45,
-    borderRadius: 12,
-  },
-  modalButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

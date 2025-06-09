@@ -33,17 +33,17 @@ const LoginScreen = () => {
       // Sign in with Firebase Auth
       const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
       
-      // Update last login in Firestore
-      await updateUserLastLogin(email);
-
       // Check if email is verified
       if (!userCredential.user.emailVerified) {
         await firebase.auth().signOut();
         setMessageType('error');
-        setMessage('Please verify your email before logging in. Check your inbox for the verification email.');
+        setMessage('Your email is not verified. Please check your inbox and verify your email before logging in.');
         setLoading(false);
         return;
       }
+
+      // Update last login in Firestore
+      await updateUserLastLogin(email);
 
       // Fetch additional user data from Firestore
       const userData = await fetchUser(email);
@@ -74,17 +74,27 @@ const LoginScreen = () => {
         lastLogin: new Date().toISOString()
       };
 
-      // Set user context and persist session
-      setUser(completeUser);
-      await setAuthState(completeUser);
+      console.log('[DEBUG] Setting user context:', completeUser);
 
-      // Navigate based on role
-      const role = userData.role?.toLowerCase();
+      // First persist the session
+      await setAuthState(completeUser);
       
-      // Let App.js handle the navigation by updating user context
-      // This will trigger the navigation through AppNavigator
+      // Set user context
+      setUser(completeUser);
+      
+      // Wait for next render cycle
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      
       setMessageType('success');
       setMessage('Login successful!');
+
+      // Get the correct dashboard name based on role
+      const role = completeUser.role?.toLowerCase();
+      const dashboardScreen = `${role.charAt(0).toUpperCase() + role.slice(1)}Dashboard`;
+      console.log('[DEBUG] Navigating to dashboard:', { role, dashboardScreen });
+      
+      // Navigate using replace
+      navigation.replace(dashboardScreen);
 
     } catch (error) {
       console.error('Login error:', error);
@@ -98,7 +108,35 @@ const LoginScreen = () => {
         errorMessage = 'Invalid email address';
       }
       
-      Alert.alert('Login Failed', errorMessage);
+      setMessageType('error');
+      setMessage(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      Alert.alert('Error', 'Please enter your email address');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await firebase.auth().sendPasswordResetEmail(email);
+      Alert.alert(
+        'Success',
+        'Password reset email has been sent. Please check your inbox.',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      let errorMessage = 'Failed to send password reset email';
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = 'No account exists with this email';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address';
+      }
+      Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -155,6 +193,14 @@ const LoginScreen = () => {
               />
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            style={styles.forgotPasswordButton}
+            onPress={handleForgotPassword}
+            disabled={loading}
+          >
+            <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity 
             style={[styles.button, loading && styles.disabledButton]} 
@@ -309,6 +355,16 @@ const styles = StyleSheet.create({
   },
   success: {
     color: '#16a34a',
+  },
+  forgotPasswordButton: {
+    alignSelf: 'flex-end',
+    marginBottom: 20,
+    marginRight: 10,
+  },
+  forgotPasswordText: {
+    color: '#f97316',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

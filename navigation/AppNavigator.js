@@ -128,6 +128,7 @@ const authScreens = [
   }
 ];
 
+
 // Role-specific screens
 const roleSpecificScreens = {
   student: [
@@ -216,21 +217,26 @@ export default function AppNavigator({ isLoggedIn, userRole }) {
 
   const { screens, initialRoute } = useMemo(() => {
     const getScreens = () => {
+      // Always include auth screens and role-specific screens
+      const baseScreens = [...authScreens, faceCaptureScreen];
+      
       if (!isLoggedIn) {
-        return [...authScreens, faceCaptureScreen];
+        return baseScreens;
       }
 
       const validRole = validateRole(userRole);
-      console.log('[DEBUG] Validated role:', { original: userRole, validated: validRole });
+      console.log('[DEBUG] Getting screens for role:', validRole);
       
       const roleScreens = roleSpecificScreens[validRole] || [];
+      console.log('[DEBUG] Role-specific screens:', roleScreens.map(s => s.name));
       
       // Combine screens ensuring no duplicates
-      const allScreens = [...roleScreens, ...commonScreens, faceCaptureScreen];
+      const allScreens = [...baseScreens, ...roleScreens, ...commonScreens];
       const uniqueScreens = allScreens.filter(
         (screen, index, self) => index === self.findIndex((s) => s.name === screen.name)
       );
       
+      console.log('[DEBUG] Available screens:', uniqueScreens.map(s => s.name));
       return uniqueScreens;
     };
 
@@ -240,12 +246,8 @@ export default function AppNavigator({ isLoggedIn, userRole }) {
       const validRole = validateRole(userRole);
       const dashboardScreen = `${validRole.charAt(0).toUpperCase() + validRole.slice(1)}Dashboard`;
       
-      // Check if dashboard screen exists for this role
-      const roleHasDashboard = roleSpecificScreens[validRole]?.some(
-        s => s.name === dashboardScreen
-      );
-      
-      return roleHasDashboard ? dashboardScreen : 'Profile';
+      console.log('[DEBUG] Setting initial route:', { validRole, dashboardScreen });
+      return dashboardScreen;
     };
 
     const screens = getScreens();
