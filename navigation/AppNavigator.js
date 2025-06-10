@@ -213,8 +213,6 @@ const debugNavigation = (screens, initialRoute, userRole) => {
 };
 
 export default function AppNavigator({ isLoggedIn, userRole }) {
-  console.log('[DEBUG] AppNavigator render:', { isLoggedIn, userRole });
-
   const { screens, initialRoute } = useMemo(() => {
     const getScreens = () => {
       // Always include auth screens and role-specific screens
@@ -225,35 +223,25 @@ export default function AppNavigator({ isLoggedIn, userRole }) {
       }
 
       const validRole = validateRole(userRole);
-      console.log('[DEBUG] Getting screens for role:', validRole);
-      
       const roleScreens = roleSpecificScreens[validRole] || [];
-      console.log('[DEBUG] Role-specific screens:', roleScreens.map(s => s.name));
       
       // Combine screens ensuring no duplicates
       const allScreens = [...baseScreens, ...roleScreens, ...commonScreens];
-      const uniqueScreens = allScreens.filter(
+      return allScreens.filter(
         (screen, index, self) => index === self.findIndex((s) => s.name === screen.name)
       );
-      
-      console.log('[DEBUG] Available screens:', uniqueScreens.map(s => s.name));
-      return uniqueScreens;
     };
 
     const getInitialRoute = () => {
       if (!isLoggedIn) return 'Login';
-      
       const validRole = validateRole(userRole);
-      const dashboardScreen = `${validRole.charAt(0).toUpperCase() + validRole.slice(1)}Dashboard`;
-      
-      console.log('[DEBUG] Setting initial route:', { validRole, dashboardScreen });
-      return dashboardScreen;
+      return `${validRole.charAt(0).toUpperCase() + validRole.slice(1)}Dashboard`;
     };
 
-    const screens = getScreens();
-    const initialRoute = getInitialRoute();
-    
-    return { screens, initialRoute };
+    return {
+      screens: getScreens(),
+      initialRoute: getInitialRoute()
+    };
   }, [isLoggedIn, userRole]);
 
   // Validate navigation setup
@@ -261,14 +249,6 @@ export default function AppNavigator({ isLoggedIn, userRole }) {
     const fallbackRoute = isLoggedIn ? 'Profile' : 'Login';
     console.warn(`[NAVIGATION WARNING] Falling back to ${fallbackRoute} due to invalid initial route for role: ${userRole}`);
   }
-
-  console.log('[DEBUG] Navigation setup:', {
-    isLoggedIn,
-    userRole,
-    validatedRole: validateRole(userRole),
-    initialRoute,
-    availableScreens: screens.map(s => s.name)
-  });
 
   return (
     <Stack.Navigator 

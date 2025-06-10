@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,10 +12,13 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
   ActivityIndicator,
+  Alert,
+  Modal,
+  FlatList,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { firebase } from '../../services/Firebase/firebaseConfig';
-import { saveUser, isEmailAuthorized, validateAdminCode } from '../../services/Firebase/firestoreService';
+import { saveUser, isEmailAuthorized, validateAdminCode, fetchDepartments } from '../../services/Firebase/firestoreService';
 import { useNavigation, useRoute, CommonActions } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -43,6 +46,32 @@ export default function SignupScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [departments, setDepartments] = useState([]);
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [showDepartmentPicker, setShowDepartmentPicker] = useState(false);
+
+  useEffect(() => {
+    const loadDepartments = async () => {
+      try {
+        setLoading(true);
+        const depts = await fetchDepartments();
+        if (depts && depts.length > 0) {
+          setDepartments(depts);
+        } else {
+          Alert.alert('Warning', 'No departments found. Please contact support.');
+        }
+      } catch (error) {
+        console.error('Error loading departments:', error);
+        Alert.alert('Error', 'Failed to load departments. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (userType === 'staff' || userType === 'admin') {
+      loadDepartments();
+    }
+  }, [userType]);
 
   const isValidEmail = (email) => {
     const lowerEmail = email.toLowerCase();
@@ -64,104 +93,122 @@ export default function SignupScreen() {
     }
   };
 
-  const handleSignup = useCallback(async () => {
-    const trimmedName = name.trim();
-    const trimmedEmail = email.trim();
-    const trimmedPassword = password.trim();
-    const trimmedConfirmPassword = confirmPassword.trim();
-    const trimmedPhone = phoneNumber.trim();
-    const trimmedUserId = userId.trim();
-
-    setMessage('');
-    setMessageType('');
-
-    if (!trimmedName || !trimmedEmail || !trimmedPassword || !trimmedConfirmPassword || !trimmedPhone || !trimmedUserId) {
-      setMessageType('error');
-      setMessage('Please fill in all required fields.');
+  const handleSignup = async () => {
+    if (!email || !password || !confirmPassword || !name || !phoneNumber || !userId) {
+      Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
-    if (!isValidEmail(trimmedEmail)) {
-      setMessageType('error');
-      setMessage(`Email must be a valid ${userType} email (${EMAIL_DOMAINS[userType].join(', ')}).`);
+    if (password !== confirmPassword) {
+      Alert.alert('Error', 'Passwords do not match');
       return;
     }
 
-    if (!isValidPhoneNumber(trimmedPhone)) {
-      setMessageType('error');
-      setMessage('Please enter a valid 10-digit phone number.');
+    if (!isValidEmail(email)) {
+      Alert.alert('Error', `Please use a valid ${userType} email address`);
       return;
     }
 
-    if (trimmedPassword !== trimmedConfirmPassword) {
-      setMessageType('error');
-      setMessage('Passwords do not match.');
+    if (!isValidPhoneNumber(phoneNumber)) {
+      Alert.alert('Error', 'Please enter a valid 10-digit phone number');
       return;
     }
 
-    if (userType === 'admin' && !validateAdminCode(trimmedUserId)) {
-      setMessageType('error');
-      setMessage('Invalid admin code.');
+    if (userType === 'admin' && !validateAdminCode(userId)) {
+      Alert.alert('Error', 'Invalid admin code');
+      return;
+    }
+
+    if ((userType === 'staff' || userType === 'admin') && !selectedDepartment) {
+      Alert.alert('Error', 'Please select a department');
       return;
     }
 
     setLoading(true);
-
     try {
-      // Check if the email is authorized
-      const isAuthorized = await isEmailAuthorized(trimmedEmail, userType);
-      if (!isAuthorized) {
-        setMessageType('error');
-        setMessage(`This email is not authorized for ${userType} registration. Please contact your administrator.`);
-        setLoading(false);
-        return;
-      }
+      // Create user with Firebase Auth
+      const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+      
+      // Save additional user data to Firestore
+      await saveUser(email, name, userId, phoneNumber, userType, selectedDepartment);
 
-      const userCredential = await firebase.auth().createUserWithEmailAndPassword(trimmedEmail, trimmedPassword);
+      // Send email verification
       await userCredential.user.sendEmailVerification();
-      await saveUser(trimmedEmail, trimmedName, trimmedUserId, trimmedPhone, userType);
 
       setMessageType('success');
-      setMessage('Registered! Please check your email for verification.');
+      setMessage('Account created successfully! Please verify your email before logging in.');
 
-      // Sign out the newly created user immediately
-      await firebase.auth().signOut();
-
-      // Clear form fields
-      setEmail('');
-      setPassword('');
-      setConfirmPassword('');
-      setName('');
-      setPhoneNumber('');
-      setUserId('');
-
-      // Reset to root navigator and navigate to Login
-      navigation.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [{ name: 'Login' }],
-        })
-      );
+      // Navigate back to login after a delay
+      setTimeout(() => {
+        navigation.navigate('Login');
+      }, 2000);
 
     } catch (error) {
-      let friendlyMessage = error.message;
-      switch (error.code) {
-        case 'auth/email-already-in-use':
-          friendlyMessage = 'This email is already registered.';
-          break;
-        case 'auth/invalid-email':
-          friendlyMessage = 'Invalid email format.';
-          break;
-        case 'auth/weak-password':
-          friendlyMessage = 'Password should be at least 6 characters.';
-          break;
+      console.error('Signup error:', error);
+      let errorMessage = 'An error occurred during signup';
+      
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = 'This email is already registered';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'Invalid email address';
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = 'Password should be at least 6 characters';
       }
+      
       setMessageType('error');
-      setMessage(friendlyMessage);
+      setMessage(errorMessage);
     } finally {
       setLoading(false);
     }
-  }, [name, email, password, confirmPassword, phoneNumber, userId, userType, navigation]);
+  };
+
+  const renderDepartmentPicker = () => {
+    if (userType !== 'staff' && userType !== 'admin') return null;
+
+    return (
+      <View style={styles.inputGroup}>
+        <TouchableOpacity
+          style={[styles.departmentPicker, !selectedDepartment && styles.placeholderPicker]}
+          onPress={() => setShowDepartmentPicker(true)}
+          disabled={loading}
+        >
+          <Text style={selectedDepartment ? styles.departmentText : styles.placeholderText}>
+            {selectedDepartment || 'Select Department *'}
+          </Text>
+          <Icon name="chevron-down" size={24} color="#a1a1aa" />
+        </TouchableOpacity>
+
+        <Modal
+          visible={showDepartmentPicker}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowDepartmentPicker(false)}
+        >
+          <TouchableWithoutFeedback onPress={() => setShowDepartmentPicker(false)}>
+            <View style={styles.modalOverlay} />
+          </TouchableWithoutFeedback>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select Department</Text>
+            <FlatList
+              data={departments}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.modalItem}
+                  onPress={() => {
+                    setSelectedDepartment(item.name);
+                    setShowDepartmentPicker(false);
+                  }}
+                >
+                  <Text style={styles.modalItemText}>{item.name}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </Modal>
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -175,7 +222,7 @@ export default function SignupScreen() {
               <Icon name="arrow-back" size={24} color="#f97316" />
             </TouchableOpacity>
 
-            <Text style={styles.heading}>ADITYA UNIVERSITY</Text>
+          <Text style={styles.heading}>ADITYA UNIVERSITY</Text>
             <Text style={styles.title}>{userType.charAt(0).toUpperCase() + userType.slice(1)} Sign Up</Text>
             <Text style={styles.instruction}>
               Only {userType}s with an official Aditya University email ({EMAIL_DOMAINS[userType].join(', ')}) can sign up.
@@ -201,6 +248,8 @@ export default function SignupScreen() {
               placeholderTextColor="#a1a1aa"
               editable={!loading}
             />
+
+            {renderDepartmentPicker()}
 
             <TextInput
               placeholder="Phone Number * (10 digits)"
@@ -271,6 +320,16 @@ export default function SignupScreen() {
                 {message}
               </Text>
             ) : null}
+
+            <TouchableOpacity
+              style={styles.loginLinkContainer}
+              onPress={() => navigation.navigate('Login')}
+              disabled={loading}
+            >
+              <Text style={styles.loginLinkText}>
+                Already have an account? <Text style={styles.loginLinkHighlight}>Login</Text>
+              </Text>
+            </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
@@ -387,5 +446,96 @@ const styles = StyleSheet.create({
   },
   success: {
     color: '#16a34a',
+  },
+  inputGroup: {
+    marginBottom: 22,
+  },
+  departmentPicker: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 18,
+    borderWidth: 2,
+    borderColor: '#f97316',
+    shadowColor: '#f97316',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  placeholderPicker: {
+    borderColor: '#f97316',
+  },
+  departmentText: {
+    color: '#161616',
+    fontSize: 17,
+    fontFamily: 'HelveticaNeue',
+    fontWeight: '600',
+  },
+  placeholderText: {
+    color: '#a1a1aa',
+    fontSize: 17,
+    fontFamily: 'HelveticaNeue',
+    fontWeight: '400',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  modalContent: {
+    position: 'absolute',
+    top: '28%',
+    left: '7%',
+    right: '7%',
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 22,
+    elevation: 12,
+    zIndex: 2000,
+    shadowColor: '#ea580c',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 18,
+    color: '#ea580c',
+    textAlign: 'center',
+    letterSpacing: 1,
+  },
+  modalItem: {
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+    alignItems: 'center',
+  },
+  modalItemText: {
+    fontSize: 18,
+    color: '#161616',
+    fontFamily: 'HelveticaNeue',
+    fontWeight: '500',
+  },
+  selectedModalItem: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 8,
+  },
+  loginLinkContainer: {
+    marginTop: 18,
+    alignItems: 'center',
+  },
+  loginLinkText: {
+    color: '#737373',
+    fontSize: 15,
+    fontFamily: 'HelveticaNeue',
+  },
+  loginLinkHighlight: {
+    color: '#f97316',
+    fontWeight: 'bold',
+    textDecorationLine: 'underline',
   },
 });

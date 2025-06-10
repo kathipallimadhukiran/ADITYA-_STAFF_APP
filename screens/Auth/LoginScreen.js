@@ -78,7 +78,7 @@ const LoginScreen = () => {
 
       // First persist the session
       await setAuthState(completeUser);
-      
+
       // Set user context
       setUser(completeUser);
       
@@ -93,8 +93,11 @@ const LoginScreen = () => {
       const dashboardScreen = `${role.charAt(0).toUpperCase() + role.slice(1)}Dashboard`;
       console.log('[DEBUG] Navigating to dashboard:', { role, dashboardScreen });
       
-      // Navigate using replace
-      navigation.replace(dashboardScreen);
+      // Navigate using reset
+      navigation.reset({
+        index: 0,
+        routes: [{ name: dashboardScreen }],
+      });
 
     } catch (error) {
       console.error('Login error:', error);
@@ -214,12 +217,15 @@ const LoginScreen = () => {
             )}
           </TouchableOpacity>
 
+          {/* Sign up link below login button */}
           <TouchableOpacity
-            style={[styles.button, styles.signupButton]}
+            style={styles.signupLinkContainer}
             onPress={() => navigation.navigate('RoleSelection')}
-            activeOpacity={0.8}
+            disabled={loading}
           >
-            <Text style={[styles.buttonText, styles.signupButtonText]}>Go to Sign Up</Text>
+            <Text style={styles.signupLinkText}>
+              Don't have an account? <Text style={styles.signupLinkHighlight}>Sign Up</Text>
+            </Text>
           </TouchableOpacity>
 
           {!!message && (
@@ -324,10 +330,20 @@ const styles = StyleSheet.create({
     shadowRadius: 7,
     elevation: 8,
   },
-  signupButton: {
-    backgroundColor: 'white',
-    borderWidth: 2,
-    borderColor: '#16a34a',
+  signupLinkContainer: {
+    marginTop: -10,
+    marginBottom: 18,
+    alignItems: 'center',
+  },
+  signupLinkText: {
+    color: '#737373',
+    fontSize: 15,
+    fontFamily: 'HelveticaNeue',
+  },
+  signupLinkHighlight: {
+    color: '#16a34a',
+    fontWeight: 'bold',
+    textDecorationLine: 'underline',
   },
   disabledButton: {
     opacity: 0.7,
@@ -336,11 +352,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '700',
     textAlign: 'center',
-    fontSize: 19,
-  },
-  signupButtonText: {
-    color: '#16a34a',
-    fontWeight: '700',
     fontSize: 19,
   },
   message: {

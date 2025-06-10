@@ -3,12 +3,13 @@ import { NavigationContainer } from '@react-navigation/native';
 import { View, LogBox, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import AppNavigator from './navigation/AppNavigator';
-import { firebase, getAuth } from './services/Firebase/firebaseConfig';
-import { getAuthState, clearAuthState } from './services/Firebase/authUtils';
+import { firebase } from './services/Firebase/firebaseConfig';
+import { getAuthState, clearAuthState, setAuthState } from './services/Firebase/authUtils';
+import { fetchUser } from './services/Firebase/firestoreService';
+import { initializeLocationTracking, startLocationTracking } from './services/LocationService';
 import { UserProvider, useUser } from './context/UserContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
-import { initializeLocationTracking, startLocationTracking } from './services/LocationService';
 
 // Define custom theme
 const theme = {
@@ -79,67 +80,53 @@ function AppContent() {
     };
   }, [user, user?.role, isLocationInitialized]);
 
+  // Handle auth state changes
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const persistedUser = await getAuthState();
-        setIsReady(true);
-      } catch (error) {
-        console.error('Auth check error:', error);
-        setIsReady(true);
-      }
-    };
-
-    // Set up Firebase auth listener
+    let isMounted = true;
     const unsubscribe = firebase.auth().onAuthStateChanged(async (firebaseUser) => {
-      if (!firebaseUser) {
-        // User is signed out
-        await clearAuthState();
-        setUser(null);
+      if (!isMounted) return;
+
+      if (firebaseUser) {
+        try {
+          const userData = await fetchUser(firebaseUser.email);
+          if (userData && isMounted) {
+            const completeUser = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              emailVerified: firebaseUser.emailVerified,
+              ...userData,
+              role: userData.role?.toLowerCase()
+            };
+            // Only update if user data has changed
+            if (JSON.stringify(completeUser) !== JSON.stringify(user)) {
+              setUser(completeUser);
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching user data:', error);
+          if (isMounted) {
+            setUser(null);
+          }
+        }
       } else {
-        setUser(firebaseUser);
-      }
-      setIsReady(true);
-    });
-
-    checkAuth();
-
-    // Cleanup subscription
-    return () => unsubscribe();
-  }, [setUser]);
-
-  const navigationState = useMemo(() => {
-    console.log('[DEBUG] Navigation state computed:', {
-      state: {
-        isLoggedIn: !!user,
-        isReady,
-        userRole: user?.role
-      },
-      user: {
-        email: user?.email,
-        role: user?.role
+        if (isMounted) {
+          setUser(null);
+        }
       }
     });
-    return {
-      isLoggedIn: !!user,
-      userRole: user?.role,
-      isReady
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
     };
-  }, [user?.role, user?.email, isReady]);
+  }, []);
 
-  useEffect(() => {
-    if (user) {
-      console.log('[DEBUG] User state updated:', { 
-        email: user.email, 
-        role: user.role,
-        isLoggedIn: !!user 
-      });
-    }
-  }, [user]);
-
-  if (!isReady) {
-    return null;
-  }
+  // Compute navigation state only when user changes
+  const navigationState = useMemo(() => ({
+    isLoggedIn: !!user?.email,
+    isReady: true,
+    userRole: user?.role?.toLowerCase()
+  }), [user?.email, user?.role]);
 
   return (
     <NavigationContainer>

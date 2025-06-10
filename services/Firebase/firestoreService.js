@@ -1,16 +1,17 @@
-import { doc, setDoc, getDoc, serverTimestamp, arrayUnion, collection, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, arrayUnion, collection, updateDoc, getDocs } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import firebase from 'firebase/compat/app';
 
-export const saveUser = async (email, name, id, phoneNumber, role) => {
+export const saveUser = async (email, name, id, phoneNumber, role, department = null) => {
   try {
-     const emailLower = email.toLowerCase(); // convert to lowercase
+    const emailLower = email.toLowerCase(); // convert to lowercase
     await setDoc(doc(db, 'users', emailLower), {
       email: emailLower, // Store email in lowercase
       name,
       id: id || null, // Store ID (can be staff, student, or admin ID)
       phoneNumber,
       role, // Add role to the user document
+      department, // Add department to the user document
       createdAt: new Date().toISOString(),
     });
     console.log('User data saved!');
@@ -434,6 +435,38 @@ export const fetchAttendanceStats = async (email) => {
     return stats;
   } catch (error) {
     console.error('Error fetching attendance statistics:', error);
+    throw error;
+  }
+};
+
+// Function to fetch departments
+export const fetchDepartments = async () => {
+  try {
+    const departmentsRef = collection(db, 'Departments');
+    const departmentsSnapshot = await getDocs(departmentsRef);
+
+    // If only one document, and fields are numbers
+    if (departmentsSnapshot.size === 1) {
+      const doc = departmentsSnapshot.docs[0];
+      const data = doc.data();
+      // Get all field values as department names
+      return Object.values(data).map((name, idx) => ({
+        id: idx.toString(),
+        name,
+      }));
+    }
+
+    // Otherwise, treat each document as a department
+    const departments = [];
+    departmentsSnapshot.forEach(doc => {
+      departments.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    return departments;
+  } catch (error) {
+    console.error('Error fetching departments:', error);
     throw error;
   }
 };

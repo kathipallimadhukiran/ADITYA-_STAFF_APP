@@ -7,78 +7,99 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator,
   Modal,
   RefreshControl,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome5';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { fetchUser } from '../../services/Firebase/firestoreService';
-import { firebase, getAuth } from "../../services/Firebase/firebaseConfig";
+import { getAuth } from "../../services/Firebase/firebaseConfig";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ProfileScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
+  const emailParam = route.params?.email || null;
+  const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [showFullImage, setShowFullImage] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  
-  // Get all data from route params
-  const {
-    userData,
-    userId,
-    name,
-    email,
-    role,
-    phoneNumber,
-    department,
-    profilePhoto,
-    id,
-    accessLevel,
-    bio,
-    emergencyContact,
-    qualifications
-  } = route.params;
+
+  const loadUserData = async () => {
+    if (!emailParam) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const data = await fetchUser(emailParam);
+      if (data) {
+        setUserData(data);
+      } else {
+        setUserData(null);
+      }
+    } catch (error) {
+      console.error('Error loading user data:', error);
+      Alert.alert('Error', 'Failed to load user data');
+      setUserData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto refresh when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadUserData();
+    }, [emailParam])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const updatedData = await fetchUser(email);
-      if (updatedData) {
-        // Update only if new data is available
-        navigation.setParams({
-          ...route.params,
-          ...updatedData
-        });
-      }
+      await loadUserData();
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
       setRefreshing(false);
     }
-  }, [email]);
+  }, [emailParam]);
 
   const handleEditPhoto = () => {
     Alert.alert('Feature Not Available', 'Photo editing is currently not available.');
   };
 
+  const processImageUpload = async (imageUri) => {
+    Alert.alert('Feature Not Available', 'Photo upload is currently not available.');
+  };
+
   const handleFaceCapture = () => {
-    navigation.navigate('FaceCaptureScreen', { 
-      userName: name,
-      email: email,
-      userData: userData
-    });
+    if (userData) {
+      navigation.navigate('FaceCaptureScreen', { 
+        userName: route.params?.userName || userData.name,
+        email: userData.email,
+        userData: userData
+      });
+    }
   };
 
   const handleEditProfile = () => {
-    navigation.navigate('EditProfile', { userData: route.params });
+    if (userData) navigation.navigate('EditProfile', { userData });
   };
 
   const handleLogout = async () => {
     try {
       const auth = getAuth();
+      if (!auth) {
+        throw new Error("Auth not initialized");
+      }
+      await auth.signOut();
       await AsyncStorage.removeItem("@auth_user");
-      await firebase.auth().signOut();
-      console.log("User signed out successfully!");
+      console.log("User signed out!");
+      
+      // Instead of using navigation.reset, we'll let App.js handle the navigation
+      // The onAuthStateChanged listener in App.js will detect the signOut
+      // and automatically show the login screen
     } catch (error) {
       console.error("Logout Error:", error);
       Alert.alert("Error", "Failed to logout. Please try again.");
@@ -95,29 +116,44 @@ const ProfileScreen = () => {
     </View>
   );
 
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#1D3557" />
+      </View>
+    );
+  }
+
+  if (!userData) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#1D3557', fontSize: 16 }}>No user data found.</Text>
+      </View>
+    );
+  }
+
   const getRoleSpecificDetails = () => {
-    switch (role?.toLowerCase()) {
+    switch (userData.role) {
       case 'staff':
         return (
           <>
-            <DetailItem icon="id-card" label="Staff ID" value={id} />
-            <DetailItem icon="building" label="Department" value={department} />
-            <DetailItem icon="graduation-cap" label="Qualifications" value={qualifications} />
+            <DetailItem icon="id-card" label="Staff ID" value={userData.id} />
+            <DetailItem icon="building" label="Department" value={userData.department} />
+            <DetailItem icon="graduation-cap" label="Qualifications" value={userData.qualifications} />
           </>
         );
       case 'student':
         return (
           <>
-            <DetailItem icon="id-card" label="Student ID" value={id} />
-            <DetailItem icon="graduation-cap" label="Course" value={userData?.course} />
-            <DetailItem icon="calendar" label="Year" value={userData?.year} />
-          </>
-        );
+            <DetailItem icon="id-card" label="Student ID" value={userData.id} />
+            <DetailItem icon="graduation-cap" label="Course" value={userData.course} />
+            <DetailItem icon="calendar" label="Year" value={userData.year} />
+          </>        );
       case 'admin':
         return (
           <>
-            <DetailItem icon="id-badge" label="Admin ID" value={id} />
-            <DetailItem icon="user-shield" label="Access Level" value={accessLevel} />
+            <DetailItem icon="id-badge" label="Admin ID" value={userData.id} />
+            <DetailItem icon="user-shield" label="Access Level" value={userData.accessLevel} />
           </>
         );
       default:
@@ -146,14 +182,15 @@ const ProfileScreen = () => {
           <TouchableOpacity onPress={() => setShowFullImage(true)}>
             <Image
               source={
-                profilePhoto
-                  ? { uri: profilePhoto }
+                userData.profilePhoto
+                  ? { uri: userData.profilePhoto }
                   : require('../../assets/default-profile.jpg')
               }
               style={styles.avatar}
               resizeMode="cover"
             />
           </TouchableOpacity>
+       
         </View>
 
         <Modal
@@ -168,8 +205,8 @@ const ProfileScreen = () => {
           >
             <Image
               source={
-                profilePhoto
-                  ? { uri: profilePhoto }
+                userData.profilePhoto
+                  ? { uri: userData.profilePhoto }
                   : require('../../assets/default-profile.jpg')
               }
               style={styles.fullScreenImage}
@@ -184,15 +221,15 @@ const ProfileScreen = () => {
           </TouchableOpacity>
         </Modal>
 
-        <Text style={styles.name}>{name}</Text>
-        <Text style={styles.role}>{role?.charAt(0).toUpperCase() + role?.slice(1)}</Text>
+        <Text style={styles.name}>{userData.name}</Text>
+        <Text style={styles.role}>{userData.role.charAt(0).toUpperCase() + userData.role.slice(1)}</Text>
 
         <TouchableOpacity style={styles.editButton} onPress={handleEditProfile}>
           <Icon name="pen" size={14} color="#fff" />
           <Text style={styles.editButtonText}>Edit Profile</Text>
         </TouchableOpacity>
 
-        {role !== 'student' && (
+        {userData.role !== 'student' && (
           <TouchableOpacity style={styles.faceCaptureButton} onPress={handleFaceCapture}>
             <Icon name="camera-retro" size={14} color="#fff" />
             <Text style={styles.faceCaptureButtonText}>Update Face ID</Text>
@@ -202,30 +239,30 @@ const ProfileScreen = () => {
 
       <View style={styles.detailsSection}>
         <Text style={styles.sectionTitle}>Basic Information</Text>
-        <DetailItem icon="envelope" label="Email" value={email} />
-        <DetailItem icon="phone" label="Phone" value={phoneNumber} />
+        <DetailItem icon="envelope" label="Email" value={userData.email} />
+        <DetailItem icon="phone" label="Phone" value={userData.phoneNumber} />
         {getRoleSpecificDetails()}
       </View>
 
-      {bio && (
+      {userData.bio && (
         <View style={styles.detailsSection}>
           <Text style={styles.sectionTitle}>About</Text>
-          <Text style={styles.bioText}>{bio}</Text>
+          <Text style={styles.bioText}>{userData.bio}</Text>
         </View>
       )}
 
-      {emergencyContact && (
+      {userData.emergencyContact && (
         <View style={styles.detailsSection}>
           <Text style={styles.sectionTitle}>Emergency Contact</Text>
           <DetailItem 
             icon="user-shield" 
             label="Contact Person" 
-            value={emergencyContact.name} 
+            value={userData.emergencyContact.name} 
           />
           <DetailItem 
             icon="phone-alt" 
             label="Emergency Number" 
-            value={emergencyContact.phone} 
+            value={userData.emergencyContact.phone} 
           />
         </View>
       )}
