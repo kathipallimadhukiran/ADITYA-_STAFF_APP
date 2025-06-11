@@ -25,7 +25,7 @@ import AttendanceSettings from '../screens/Admin/AttendanceSettings';
 const Stack = createNativeStackNavigator();
 
 // Valid roles configuration
-const VALID_ROLES = ['student', 'staff', 'admin'];
+const VALID_ROLES = ['student', 'staff', 'admin', 'faculty'];
 const DEFAULT_ROLE = 'student';
 
 // Common screens configuration shared between roles
@@ -115,6 +115,12 @@ const authScreens = [
     options: { headerShown: false }
   },
   {
+    name: "FacultySignup",
+    component: SignupScreen,
+    initialParams: { userType: 'faculty' },
+    options: { headerShown: false }
+  },
+  {
     name: "StaffSignup",
     component: SignupScreen,
     initialParams: { userType: 'staff' },
@@ -140,6 +146,23 @@ const roleSpecificScreens = {
     {
       name: "Results",
       component: Results,
+      options: { headerShown: true }
+    }
+  ],
+  faculty: [
+    {
+      name: "FacultyDashboard",
+      component: DashboardScreen,
+      options: { headerShown: false }
+    },
+    {
+      name: "StaffAttendanceTracker",
+      component: StaffAttendanceTracker,
+      options: { headerShown: true }
+    },
+    {
+      name: "StaffLocationTracker",
+      component: StaffLocationTracker,
       options: { headerShown: true }
     }
   ],
@@ -222,11 +245,11 @@ export default function AppNavigator({ isLoggedIn, userRole }) {
         return baseScreens;
       }
 
-      const validRole = validateRole(userRole);
-      const roleScreens = roleSpecificScreens[validRole] || [];
+      // Include screens for all roles to allow navigation between roles if needed
+      const allRoleScreens = Object.values(roleSpecificScreens).flat();
       
       // Combine screens ensuring no duplicates
-      const allScreens = [...baseScreens, ...roleScreens, ...commonScreens];
+      const allScreens = [...baseScreens, ...allRoleScreens, ...commonScreens];
       return allScreens.filter(
         (screen, index, self) => index === self.findIndex((s) => s.name === screen.name)
       );

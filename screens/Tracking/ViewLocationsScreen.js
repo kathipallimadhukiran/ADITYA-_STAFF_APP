@@ -22,8 +22,8 @@ import Icon from 'react-native-vector-icons/FontAwesome5';
 import * as Location from 'expo-location';
 
 export default function ViewLocationsScreen() {
-  const [users, setUsers] = useState([]); // List of all users grouped by department
-  const [departments, setDepartments] = useState([]); // List of unique departments
+  const [usersByRole, setUsersByRole] = useState({}); // Users grouped by role then department
+  const [selectedRole, setSelectedRole] = useState(null);
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -112,7 +112,7 @@ export default function ViewLocationsScreen() {
     }
   };
 
-  // Function to fetch users grouped by department
+  // Function to fetch users grouped by role and department
   const fetchUsers = async () => {
     try {
       console.log('Fetching users...');
@@ -120,33 +120,36 @@ export default function ViewLocationsScreen() {
       
       const usersSnapshot = await db
         .collection('users')
-        .where('role', 'in', ['staff', 'admin'])
+        .where('role', 'in', ['staff', 'admin', 'faculty'])
         .get();
 
-      const usersByDepartment = {};
-      const deptSet = new Set();
-
+      const groupedUsers = {};
+      
       usersSnapshot.docs.forEach(doc => {
         const userData = doc.data();
+        const role = userData.role || 'Unassigned';
         const dept = userData.department || 'Unassigned';
-        deptSet.add(dept);
 
-        if (!usersByDepartment[dept]) {
-          usersByDepartment[dept] = [];
+        if (!groupedUsers[role]) {
+          groupedUsers[role] = {};
+        }
+        
+        if (!groupedUsers[role][dept]) {
+          groupedUsers[role][dept] = [];
         }
 
-        usersByDepartment[dept].push({
+        groupedUsers[role][dept].push({
           id: doc.id,
           name: userData.name || 'Unknown User',
           email: userData.email,
-          role: userData.role,
+          role: role,
           department: dept,
           profilePhoto: userData.profilePhoto || null
         });
       });
 
-      setDepartments(Array.from(deptSet).sort());
-      setUsers(usersByDepartment);
+      setUsersByRole(groupedUsers);
+      setSelectedRole(null);
       setSelectedDepartment(null);
     } catch (error) {
       console.error('Error fetching users:', error);
@@ -298,83 +301,110 @@ export default function ViewLocationsScreen() {
       .catch(err => console.error('Error opening maps:', err));
   };
 
-  const renderDepartmentItem = ({ item: department }) => {
-    const departmentUsers = users[department] || [];
-    const filteredUsers = searchQuery
-      ? departmentUsers.filter(user => 
-          user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          user.email.toLowerCase().includes(searchQuery.toLowerCase()))
-      : departmentUsers;
+  const renderRoleSection = ({ item: role }) => {
+    const departmentsInRole = Object.keys(usersByRole[role] || {});
+    
+    // Filter departments that have matching users based on search query
+    const filteredDepartments = departmentsInRole.filter(dept => {
+      const usersInDept = usersByRole[role][dept];
+      return searchQuery
+        ? usersInDept.some(user =>
+            user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            user.email.toLowerCase().includes(searchQuery.toLowerCase()))
+        : true;
+    });
 
-    if (filteredUsers.length === 0) return null;
+    if (filteredDepartments.length === 0) return null;
 
     return (
-      <View style={styles.departmentSection}>
+      <View style={styles.roleSection}>
         <TouchableOpacity 
-          style={styles.departmentHeader}
-          onPress={() => setSelectedDepartment(
-            selectedDepartment === department ? null : department
-          )}
+          style={[
+            styles.roleHeader,
+            selectedRole === role && styles.selectedHeader
+          ]}
+          onPress={() => setSelectedRole(selectedRole === role ? null : role)}
         >
-          <Text style={styles.departmentTitle}>{department}</Text>
+          <View style={styles.roleHeaderContent}>
+            <Icon 
+              name={role === 'admin' ? 'user-shield' : role === 'faculty' ? 'chalkboard-teacher' : 'user'}
+              size={18}
+              color="#1D3557"
+              style={styles.roleIcon}
+            />
+            <Text style={styles.roleTitle}>{role.toUpperCase()}</Text>
+          </View>
           <Icon 
-            name={selectedDepartment === department ? "chevron-up" : "chevron-down"} 
+            name={selectedRole === role ? "chevron-up" : "chevron-down"} 
             size={16} 
             color="#1D3557" 
           />
         </TouchableOpacity>
 
-        {selectedDepartment === department && (
-          <FlatList
-            data={filteredUsers}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item: user }) => (
-              <TouchableOpacity onPress={() => handleUserSelect(user)}>
-                <Card style={styles.userCard}>
-                  <Card.Content>
-                    <View style={styles.userInfo}>
-                      <View style={styles.userBasicInfo}>
-                        <View style={styles.avatarContainer}>
-                          {user.profilePhoto ? (
-                            <Image
-                              source={{ uri: user.profilePhoto }}
-                              style={styles.userAvatar}
-                            />
-                          ) : (
-                            <View style={[styles.userAvatar, styles.defaultAvatar]}>
-                              <Icon name="user" size={20} color="#457B9D" />
+        {selectedRole === role && (
+          <View style={styles.departmentsContainer}>
+            {filteredDepartments.map(department => (
+              <View key={department} style={styles.departmentSection}>
+                <TouchableOpacity 
+                  style={[
+                    styles.departmentHeader,
+                    selectedDepartment === department && styles.selectedDepartment
+                  ]}
+                  onPress={() => setSelectedDepartment(
+                    selectedDepartment === department ? null : department
+                  )}
+                >
+                  <Text style={styles.departmentTitle}>{department}</Text>
+                  <Icon 
+                    name={selectedDepartment === department ? "chevron-up" : "chevron-down"} 
+                    size={16} 
+                    color="#1D3557" 
+                  />
+                </TouchableOpacity>
+
+                {selectedDepartment === department && (
+                  <FlatList
+                    data={usersByRole[role][department].filter(user =>
+                      searchQuery
+                        ? user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          user.email.toLowerCase().includes(searchQuery.toLowerCase())
+                        : true
+                    )}
+                    keyExtractor={(item) => item.id}
+                    renderItem={({ item: user }) => (
+                      <TouchableOpacity onPress={() => handleUserSelect(user)}>
+                        <Card style={styles.userCard}>
+                          <Card.Content>
+                            <View style={styles.userInfo}>
+                              <View style={styles.userBasicInfo}>
+                                <View style={styles.avatarContainer}>
+                                  {user.profilePhoto ? (
+                                    <Image
+                                      source={{ uri: user.profilePhoto }}
+                                      style={styles.userAvatar}
+                                    />
+                                  ) : (
+                                    <View style={[styles.userAvatar, styles.defaultAvatar]}>
+                                      <Icon name="user" size={20} color="#457B9D" />
+                                    </View>
+                                  )}
+                                </View>
+                                <View style={styles.userTextInfo}>
+                                  <Text style={styles.userName}>{user.name}</Text>
+                                  <Text style={styles.userEmail}>{user.email}</Text>
+                                </View>
+                              </View>
+                              <Icon name="chevron-right" size={16} color="#6C757D" />
                             </View>
-                          )}
-                          <Animated.View 
-                            style={[
-                              styles.statusStroke,
-                              {
-                                opacity: opacityAnim,
-                                transform: [{ rotate: spin }]
-                              }
-                            ]} 
-                          />
-                          <Animated.View 
-                            style={[
-                              styles.statusStrokeGlow,
-                              {
-                                opacity: opacityAnim,
-                              }
-                            ]} 
-                          />
-                        </View>
-                        <View style={styles.userTextInfo}>
-                          <Text style={styles.userName}>{user.name}</Text>
-                          <Text style={styles.userRole}>{user.role.toUpperCase()}</Text>
-                        </View>
-                      </View>
-                      <Icon name="chevron-right" size={16} color="#6C757D" />
-                    </View>
-                  </Card.Content>
-                </Card>
-              </TouchableOpacity>
-            )}
-          />
+                          </Card.Content>
+                        </Card>
+                      </TouchableOpacity>
+                    )}
+                  />
+                )}
+              </View>
+            ))}
+          </View>
         )}
       </View>
     );
@@ -548,8 +578,8 @@ export default function ViewLocationsScreen() {
       </View>
 
       <FlatList
-        data={departments}
-        renderItem={renderDepartmentItem}
+        data={Object.keys(usersByRole)}
+        renderItem={renderRoleSection}
         keyExtractor={(item) => item}
         refreshControl={
           <RefreshControl
@@ -598,22 +628,60 @@ const styles = StyleSheet.create({
   clearButton: {
     padding: 8,
   },
-  departmentSection: {
+  roleSection: {
     marginBottom: 16,
+  },
+  roleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#E9ECEF',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  roleHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  roleIcon: {
+    marginRight: 12,
+  },
+  roleTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1D3557',
+  },
+  selectedHeader: {
+    backgroundColor: '#457B9D',
+  },
+  departmentsContainer: {
+    marginLeft: 16,
+  },
+  departmentSection: {
+    marginBottom: 8,
   },
   departmentHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#E9ECEF',
+    backgroundColor: '#F8F9FA',
     padding: 12,
     borderRadius: 8,
     marginBottom: 8,
   },
+  selectedDepartment: {
+    backgroundColor: '#E3E3E3',
+  },
   departmentTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
     color: '#1D3557',
+    fontWeight: '500',
+  },
+  userEmail: {
+    fontSize: 12,
+    color: '#6C757D',
+    marginTop: 2,
   },
   userCard: {
     marginBottom: 8,
@@ -647,32 +715,6 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-  },
-  statusStroke: {
-    position: 'absolute',
-    top: -2,
-    left: -2,
-    right: -2,
-    bottom: -2,
-    borderRadius: 22,
-    borderWidth: 2,
-    borderColor: '#28A745',
-    borderStyle: 'solid',
-  },
-  statusStrokeGlow: {
-    position: 'absolute',
-    top: -2,
-    left: -2,
-    right: -2,
-    bottom: -2,
-    borderRadius: 22,
-    borderWidth: 2,
-    borderColor: '#28A745',
-    shadowColor: '#28A745',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 5,
-    elevation: 5,
   },
   modalStatusStroke: {
     position: 'absolute',
@@ -743,11 +785,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1D3557',
     fontWeight: '500',
-  },
-  userRole: {
-    fontSize: 12,
-    color: '#457B9D',
-    marginTop: 2,
   },
   headerTextContainer: {
     flex: 1,

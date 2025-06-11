@@ -1,11 +1,11 @@
 {
   "expo": {
     "name": "ADITYA-APP",
-    "slug": "ADITYA-APP",
+    "slug": "aditya-app",
     "version": "1.0.0",
+    "owner": "kathipallimadhu14",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "owner": "madhukiranyt12",
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "plugins": [
@@ -57,12 +57,14 @@
     },
     "android": {
       "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
-        "FOREGROUND_SERVICE",
-        "WAKE_LOCK",
-        "RECEIVE_BOOT_COMPLETED"
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ],
       "package": "com.adityaapp.tracking",
       "googleServicesFile": "./google-services.json",
@@ -86,16 +88,13 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "extra": {
-      "eas": {
-        "projectId": "fbe6932d-271a-43ed-b6bb-706303a0a7a7"
-      }
-    },
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
-    "updates": {
-      "url": "https://u.expo.dev/fbe6932d-271a-43ed-b6bb-706303a0a7a7"
+    "extra": {
+      "eas": {
+        "projectId": "426e07a7-63a3-45d4-b2dc-d429af28b050"
+      }
     }
   }
 }

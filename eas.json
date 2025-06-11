@@ -1,32 +1,33 @@
 {
   "cli": {
-    "version": ">= 5.9.1"
+    "version": ">= 16.9.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "android": {
-        "gradleCommand": ":app:assembleDebug"
-      }
+      "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal",
       "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
-      }
-    },
-    "preview-apk": {
+        "buildType": "apk"
+      },
       "distribution": "internal",
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://face-recognition-final.onrender.com"
       }
     },
     "production": {
+      "autoIncrement": true
+    },
+    "apk": {
       "android": {
-        "buildType": "app-bundle"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease",
+        "withoutCredentials": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://face-recognition-final.onrender.com"
       }
     }
   },

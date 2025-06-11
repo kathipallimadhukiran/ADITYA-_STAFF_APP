@@ -16,8 +16,8 @@ import Icon from 'react-native-vector-icons/FontAwesome5';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { db } from '../../services/Firebase/firebaseConfig';
 import { doc, updateDoc } from 'firebase/firestore';
-import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
-import { uploadToCloudinary, deleteFromCloudinary } from '../../services/cloudinaryService';
+import * as ImagePicker from 'expo-image-picker';
+import { uploadToCloudinary } from '../../services/api/uploadToCloudinary ';
 const EditProfile = () => {
   const navigation = useNavigation();
   const route = useRoute();
@@ -57,70 +57,85 @@ const EditProfile = () => {
 
   const handleImagePick = async () => {
     try {
-      const options = {
-        mediaType: 'photo',
-        includeBase64: false,
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
         quality: 1,
-        width: 500,
-        height: 500,
-        cropping: true,
-        cropperCircleOverlay: true,
-        enableRotationGesture: true,
-      };
+      });
 
-      const result = await launchImageLibrary(options);
-
-      if (!result.didCancel && result.assets && result.assets[0]) {
+      if (!result.canceled && result.assets && result.assets[0]) {
         setIsUploadingImage(true);
         try {
-          const uploadedUrl = await uploadToCloudinary(result.assets[0].uri, profileImage);
-          setProfileImage(uploadedUrl);
-          await saveProfilePhoto(uploadedUrl); // Automatically save the photo
+          console.log('Starting upload to Cloudinary:', result.assets[0].uri);
+          const uploadedUrl = await uploadToCloudinary(result.assets[0].uri, {
+            folder: 'profile_photos',
+            preset: 'facesimages'
+          });
+          console.log('Upload successful, URL:', uploadedUrl);
+          
+          if (uploadedUrl) {
+            setProfileImage(uploadedUrl);
+            await saveProfilePhoto(uploadedUrl);
+            console.log('Profile photo saved to Firestore');
+          } else {
+            throw new Error('No URL returned from upload');
+          }
         } catch (error) {
-          Alert.alert('Error', 'Failed to upload image');
           console.error('Upload error:', error);
+          Alert.alert('Error', 'Failed to upload image: ' + error.message);
         } finally {
           setIsUploadingImage(false);
         }
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to pick image');
       console.error('Image picker error:', error);
+      Alert.alert('Error', 'Failed to pick image: ' + error.message);
     }
   };
 
   const handleTakePhoto = async () => {
     try {
-      const options = {
-        mediaType: 'photo',
-        includeBase64: false,
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission required', 'Camera permission is required.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
         quality: 1,
-        width: 500,
-        height: 500,
-        cropping: true,
-        cropperCircleOverlay: true,
-        enableRotationGesture: true,
-        saveToPhotos: true,
-      };
+      });
 
-      const result = await launchCamera(options);
-
-      if (!result.didCancel && result.assets && result.assets[0]) {
+      if (!result.canceled && result.assets && result.assets[0]) {
         setIsUploadingImage(true);
         try {
-          const uploadedUrl = await uploadToCloudinary(result.assets[0].uri, profileImage);
-          setProfileImage(uploadedUrl);
-          await saveProfilePhoto(uploadedUrl); // Automatically save the photo
+          console.log('Starting upload to Cloudinary:', result.assets[0].uri);
+          const uploadedUrl = await uploadToCloudinary(result.assets[0].uri, {
+            folder: 'profile_photos',
+            preset: 'facesimages'
+          });
+          console.log('Upload successful, URL:', uploadedUrl);
+          
+          if (uploadedUrl) {
+            setProfileImage(uploadedUrl);
+            await saveProfilePhoto(uploadedUrl);
+            console.log('Profile photo saved to Firestore');
+          } else {
+            throw new Error('No URL returned from upload');
+          }
         } catch (error) {
-          Alert.alert('Error', 'Failed to upload image');
           console.error('Upload error:', error);
+          Alert.alert('Error', 'Failed to upload image: ' + error.message);
         } finally {
           setIsUploadingImage(false);
         }
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to take photo');
       console.error('Camera error:', error);
+      Alert.alert('Error', 'Failed to take photo: ' + error.message);
     }
   };
 
@@ -144,6 +159,17 @@ const EditProfile = () => {
       ],
       { cancelable: true }
     );
+  };
+
+  const handleDeletePhoto = async () => {
+    try {
+      const userRef = doc(db, 'users', userData.email);
+      await updateDoc(userRef, { profilePhoto: null });
+      setProfileImage(null);
+      Alert.alert('Success', 'Profile photo removed.');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to remove profile photo.');
+    }
   };
 
   const handleSave = async () => {
@@ -205,6 +231,7 @@ const EditProfile = () => {
                 value={formData.department}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, department: text }))}
                 placeholder="Enter department"
+                placeholderTextColor="#a1a1aa"
               />
             </View>
             <View style={styles.inputGroup}>
@@ -214,6 +241,7 @@ const EditProfile = () => {
                 value={formData.qualifications}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, qualifications: text }))}
                 placeholder="Enter qualifications"
+                placeholderTextColor="#a1a1aa"
               />
             </View>
           </>
@@ -228,6 +256,7 @@ const EditProfile = () => {
                 value={formData.course}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, course: text }))}
                 placeholder="Enter course"
+                placeholderTextColor="#a1a1aa"
               />
             </View>
             <View style={styles.inputGroup}>
@@ -238,6 +267,7 @@ const EditProfile = () => {
                 onChangeText={(text) => setFormData(prev => ({ ...prev, year: text }))}
                 placeholder="Enter year"
                 keyboardType="numeric"
+                placeholderTextColor="#a1a1aa"
               />
             </View>
           </>
@@ -297,8 +327,9 @@ const EditProfile = () => {
             <TextInput
               style={styles.input}
               value={formData.name}
-              onChangeText={(text) => setFormData(prev => ({ ...prev, name: text }))}
+              onChangeText={text => setFormData(prev => ({ ...prev, name: text }))}
               placeholder="Enter name"
+              placeholderTextColor="#a1a1aa"
             />
           </View>
 
@@ -307,9 +338,10 @@ const EditProfile = () => {
             <TextInput
               style={styles.input}
               value={formData.phoneNumber}
-              onChangeText={(text) => setFormData(prev => ({ ...prev, phoneNumber: text }))}
+              onChangeText={text => setFormData(prev => ({ ...prev, phoneNumber: text }))}
               placeholder="Enter phone number"
               keyboardType="phone-pad"
+              placeholderTextColor="#a1a1aa"
             />
           </View>
 
@@ -318,10 +350,11 @@ const EditProfile = () => {
             <TextInput
               style={[styles.input, styles.textArea]}
               value={formData.bio}
-              onChangeText={(text) => setFormData(prev => ({ ...prev, bio: text }))}
+              onChangeText={text => setFormData(prev => ({ ...prev, bio: text }))}
               placeholder="Write something about yourself"
               multiline
               numberOfLines={4}
+              placeholderTextColor="#a1a1aa"
             />
           </View>
 
@@ -334,11 +367,12 @@ const EditProfile = () => {
               <TextInput
                 style={styles.input}
                 value={formData.emergencyContact.name}
-                onChangeText={(text) => setFormData(prev => ({
+                onChangeText={text => setFormData(prev => ({
                   ...prev,
                   emergencyContact: { ...prev.emergencyContact, name: text }
                 }))}
                 placeholder="Enter emergency contact name"
+                placeholderTextColor="#a1a1aa"
               />
             </View>
             <View style={styles.inputGroup}>
@@ -352,6 +386,7 @@ const EditProfile = () => {
                 }))}
                 placeholder="Enter emergency contact phone"
                 keyboardType="phone-pad"
+                placeholderTextColor="#a1a1aa"
               />
             </View>
           </View>
@@ -418,6 +453,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   input: {
+  color: '#000',
     backgroundColor: '#fff',
     borderRadius: 8,
     padding: 12,

@@ -1,18 +1,19 @@
-import { doc, setDoc, getDoc, serverTimestamp, arrayUnion, collection, updateDoc, getDocs } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, arrayUnion, collection, updateDoc, getDocs, query, where, addDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import firebase from 'firebase/compat/app';
 
 export const saveUser = async (email, name, id, phoneNumber, role, department = null) => {
   try {
-    const emailLower = email.toLowerCase(); // convert to lowercase
+    const emailLower = email.toLowerCase().trim(); // convert to lowercase and trim
     await setDoc(doc(db, 'users', emailLower), {
       email: emailLower, // Store email in lowercase
-      name,
-      id: id || null, // Store ID (can be staff, student, or admin ID)
-      phoneNumber,
+      name: name.trim(),
+      id: (id || '').trim(), // Store ID (can be staff, student, or admin ID)
+      phoneNumber: phoneNumber.trim(),
       role, // Add role to the user document
-      department, // Add department to the user document
+      department: department ? department.trim() : null, // Add department to the user document
       createdAt: new Date().toISOString(),
+      isVerified: false // Will be set to true when email is verified
     });
     console.log('User data saved!');
   } catch (error) {
@@ -23,8 +24,8 @@ export const saveUser = async (email, name, id, phoneNumber, role, department = 
 
 export const fetchUser = async (email) => {
   try {
-    // Convert email to lowercase for consistency
-    const lowerEmail = email.toLowerCase();
+    // Convert email to lowercase and trim for consistency
+    const lowerEmail = email.toLowerCase().trim();
     const userDoc = await getDoc(doc(db, 'users', lowerEmail));
     
     if (userDoc.exists()) {
@@ -47,8 +48,8 @@ export const isEmailAuthorized = async (email, role) => {
   try {
     const emailLower = email.toLowerCase();
     
-    // For staff emails
-    if (role === 'staff') {
+    // For staff and faculty emails
+    if (role === 'staff' || role === 'faculty') {
       const validDomains = ['@aec.edu.in', '@gmail.com'];
       return validDomains.some(domain => emailLower.endsWith(domain.toLowerCase()));
     }
@@ -193,8 +194,8 @@ export const saveLocationRecord = async (email, role, locationData) => {
 
 export const updateUserLastLogin = async (email) => {
   try {
-    // Convert email to lowercase for consistency
-    const lowerEmail = email.toLowerCase();
+    // Convert email to lowercase and trim for consistency
+    const lowerEmail = email.toLowerCase().trim();
     const userRef = doc(db, 'users', lowerEmail);
     const userDoc = await getDoc(userRef);
 
@@ -468,5 +469,129 @@ export const fetchDepartments = async () => {
   } catch (error) {
     console.error('Error fetching departments:', error);
     throw error;
+  }
+};
+
+export const fetchRoleSpecificDepartments = async (role) => {
+  try {
+    let docId;
+    switch (role) {
+      case 'faculty':
+        docId = 'faculty';
+        break;
+      case 'staff':
+        docId = 'staff';
+        break;
+      case 'admin':
+        docId = 'admin';
+        break;
+      default:
+        throw new Error('Invalid role specified');
+    }
+
+    console.log('[DEBUG] Fetching departments for role:', role);
+    
+    // Get the document reference using firebase.firestore()
+    const docRef = firebase.firestore().collection('Departments').doc(docId);
+    console.log('[DEBUG] Attempting to fetch document:', docId);
+    
+    const departmentDoc = await docRef.get();
+    console.log('[DEBUG] Document exists?', departmentDoc.exists);
+    
+    if (departmentDoc.exists) {
+      const data = departmentDoc.data();
+      console.log('[DEBUG] Document data:', data);
+      
+      // For admin roles, we expect numeric string keys (0-9)
+      if (role === 'admin') {
+        const adminRoles = Object.entries(data)
+          .map(([key, value]) => ({
+            id: key,
+            name: value
+          }))
+          .sort((a, b) => parseInt(a.id) - parseInt(b.id));
+          
+        console.log('[DEBUG] Processed admin roles:', adminRoles);
+        return adminRoles;
+      }
+
+      // For faculty and staff, handle as before
+      const departments = Object.entries(data).map(([id, name]) => ({
+        id,
+        name: name.toString()
+      }));
+      
+      console.log('[DEBUG] Processed departments:', departments);
+      return departments;
+    }
+
+    console.log(`[DEBUG] No departments/roles found for: ${role}`);
+    return [];
+  } catch (error) {
+    console.error('[DEBUG] Error fetching departments/roles:', error);
+    throw error;
+  }
+};
+
+// Function to initialize admin roles
+export const initializeAdminRoles = async () => {
+  try {
+    const adminRoles = {
+      "0": "Vice Chancellor",
+      "1": "Registrar",
+      "2": "Dean of Academics",
+      "3": "Controller of Examinations",
+      "4": "Director of Research",
+      "5": "Finance Officer",
+      "6": "HR Manager",
+      "7": "Super Admin",
+      "8": "System Admin",
+      "9": "Department Admin(Operator)"
+    };
+
+    await setDoc(doc(db, 'Departments', 'admin'), adminRoles);
+    console.log('Admin roles initialized successfully');
+    return true;
+  } catch (error) {
+    console.error('Error initializing admin roles:', error);
+    throw error;
+  }
+};
+
+export const updatePushToken = async (email, token) => {
+  try {
+    if (!email || !token) {
+      console.log('Email and token are required for push token update');
+      return;
+    }
+
+    const lowerEmail = email.toLowerCase().trim();
+    const userRef = doc(db, 'users', lowerEmail);
+    
+    // First check if user exists
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      // Create user document if it doesn't exist
+      await setDoc(userRef, {
+        email: lowerEmail,
+        pushToken: token,
+        createdAt: serverTimestamp(),
+        lastUpdated: serverTimestamp()
+      });
+    } else {
+      // Update existing document
+      await updateDoc(userRef, {
+        pushToken: token,
+        lastUpdated: serverTimestamp()
+      });
+    }
+    
+    console.log('Push token updated successfully');
+    return true;
+  } catch (error) {
+    console.error('Error updating push token:', error);
+    // Don't throw the error, just log it
+    return false;
   }
 };

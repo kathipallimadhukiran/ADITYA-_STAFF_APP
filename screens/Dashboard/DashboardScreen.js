@@ -12,6 +12,7 @@ import {
   Alert,
   Image,
   AppState,
+  Platform,
 } from "react-native";
 import Icon from "react-native-vector-icons/FontAwesome5";
 import { getAuth, db } from "../../services/Firebase/firebaseConfig";
@@ -55,26 +56,22 @@ const DashboardScreen = () => {
   const [nextRefreshTime, setNextRefreshTime] = useState(new Date());
   const [lastAbsentCheck, setLastAbsentCheck] = useState(null);
 
-  // Static announcements and events
-  const [announcements] = useState([
-    { id: "1", title: "Staff meeting at 2 PM", time: "10 mins ago", department: "All", forRoles: ["admin", "staff"] },
-    { id: "2", title: "Deadline for reports submission", time: "1 hour ago", department: "Academic", forRoles: ["admin", "staff"] },
-    { id: "3", title: "System training session", time: "Yesterday", department: "IT", forRoles: ["admin", "staff"] },
-    { id: "4", title: "Exam Schedule Released", time: "2 hours ago", department: "Academic", forRoles: ["student"] },
-    { id: "5", title: "Library Hours Extended", time: "Yesterday", department: "Library", forRoles: ["student"] },
-    { id: "6", title: "Sports Day Registration", time: "3 hours ago", department: "Sports", forRoles: ["student"] },
-  ]);
-
-  const [upcomingEvents] = useState([
-    { id: "1", title: "Monthly review", date: "Tomorrow, 10:00 AM", location: "Conference Room A", forRoles: ["admin", "staff"] },
-    { id: "2", title: "Parent-Teacher meeting", date: "Friday, 2:00 PM", location: "Main Hall", forRoles: ["admin", "staff", "student"] },
-    { id: "3", title: "Cultural Event", date: "Saturday, 3:00 PM", location: "Auditorium", forRoles: ["student"] },
-    { id: "4", title: "Career Counseling", date: "Next Monday, 11:00 AM", location: "Seminar Hall", forRoles: ["student"] },
-  ]);
-
+  
   const staffQuickActions = [
     { id: "1", label: "Mark Attendance", icon: "clipboard-check", bgColor: "#FF9F1C", route: "MarkAttendance" },
-    { id: "2", label: "ID Card", icon: "id-card", bgColor: "#3A86FF", route: "DigitalIDCard", params: { userData: user } },
+    { 
+      id: "2", 
+      label: "ID Card", 
+      icon: "id-card", 
+      bgColor: "#3A86FF", 
+      route: "DigitalIDCard", 
+      params: { 
+        userData: user ? {
+          ...user,
+          qrCode: user.qrCode ? String(user.qrCode) : null
+        } : null 
+      }
+    },
     { id: "3", label: "My Tasks", icon: "tasks", bgColor: "#2EC4B6", route: "MyTasksScreen" },
     { id: "4", label: "Appointments", icon: "calendar-check", bgColor: "#F94144", route: "Appointments" },
     { id: "5", label: "View Schedule", icon: "calendar-alt", bgColor: "#F3722C", route: "ViewSchedule" },
@@ -84,8 +81,27 @@ const DashboardScreen = () => {
 
   const adminQuickActions = [
     { id: "1", label: "Mark Attendance", icon: "clipboard-check", bgColor: "#F94144", route: "MarkAttendance" },
-    { id: "2", label: "ID Card", icon: "id-card", bgColor: "#3A86FF", route: "DigitalIDCard", params: { userData: user } },
-    { id: "3", label: "User Access", icon: "user-shield", bgColor: "#FF9F1C", route: "UserAccessManagement" },
+    { 
+      id: "2", 
+      label: "ID Card", 
+      icon: "id-card", 
+      bgColor: "#3A86FF", 
+      route: "DigitalIDCard", 
+      params: { 
+        userData: user ? {
+          ...user,
+          qrCode: user.qrCode ? String(user.qrCode) : null
+        } : null 
+      }
+    },
+    { 
+      id: "3", 
+      label: "User Access", 
+      icon: "user-shield", 
+      bgColor: "#FF9F1C", 
+      route: "UserAccessManagement",
+      params: { key: `UserAccess-${Date.now()}` }
+    },
     { id: "4", label: "My Tasks", icon: "tasks", bgColor: "#2EC4B6", route: "MyTasksScreen" },
     { id: "5", label: "Appointments", icon: "calendar-check", bgColor: "#F94144", route: "Appointments" },
     { id: "6", label: "View Schedule", icon: "calendar-alt", bgColor: "#F3722C", route: "ViewSchedule" },
@@ -95,7 +111,19 @@ const DashboardScreen = () => {
   ];
 
   const studentQuickActions = [
-    { id: "1", label: "ID Card", icon: "id-card", bgColor: "#3A86FF", route: "DigitalIDCard", params: { userData: user } },
+    { 
+      id: "1", 
+      label: "ID Card", 
+      icon: "id-card", 
+      bgColor: "#3A86FF", 
+      route: "DigitalIDCard", 
+      params: { 
+        userData: user ? {
+          ...user,
+          qrCode: user.qrCode ? String(user.qrCode) : null
+        } : null 
+      }
+    },
     { id: "2", label: "My Tasks", icon: "tasks", bgColor: "#2EC4B6", route: "MyTasksScreen" },
     { id: "3", label: "Class Schedule", icon: "calendar-alt", bgColor: "#2EC4B6", route: "ViewSchedule" },
     { id: "4", label: "Results", icon: "chart-bar", bgColor: "#F3722C", route: "Results" },
@@ -511,7 +539,7 @@ const DashboardScreen = () => {
           return;
         }
 
-        if (!user || !['staff', 'admin'].includes(user?.role?.toLowerCase())) {
+        if (!user || !['staff','faculty', 'admin'].includes(user?.role?.toLowerCase())) {
           console.log('User not authorized for location tracking');
           return;
         }
@@ -614,6 +642,7 @@ const DashboardScreen = () => {
     return (
       userRole === 'staff' ||
       userRole === 'admin' ||
+      userRole === 'faculty' ||   
       userRole.includes('admin') ||
       userAccess.includes('admin')
     );
@@ -629,7 +658,10 @@ const DashboardScreen = () => {
       return adminQuickActions.filter(action => !action.superAdminOnly || isSuperAdmin);
     } else if (userRole === 'staff') {
       return staffQuickActions;
-    } else {
+    } 
+    else if (userRole === 'faculty'){
+      return staffQuickActions;
+    }else {
       return studentQuickActions;
     }
   };
@@ -1033,7 +1065,11 @@ const DashboardScreen = () => {
   const renderAppointmentsSection = () => {
 
     const renderAppointment = (appointment) => (
-      <Card key={appointment.id} style={styles.appointmentCard}>
+      <TouchableOpacity
+        key={appointment.id}
+        style={styles.appointmentCard}
+        onPress={() => navigation.navigate('Appointments')}
+      >
         <Card.Content>
           <View style={styles.appointmentHeader}>
             <View style={styles.appointmentInfo}>
@@ -1054,17 +1090,18 @@ const DashboardScreen = () => {
             </View>
           </View>
         </Card.Content>
-      </Card>
+      </TouchableOpacity>
     );
 
     return (
       <View style={styles.sectionContainer}>
-        <View style={styles.sectionHeader}>
+        <TouchableOpacity 
+          style={styles.sectionHeader}
+          onPress={() => navigation.navigate('Appointments')}
+        >
           <Text style={styles.sectionTitle}>Upcoming Appointments</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Appointments')}>
-            <Text style={styles.viewAllText}>View All</Text>
-          </TouchableOpacity>
-        </View>
+          <Text style={styles.viewAllText}>View All</Text>
+        </TouchableOpacity>
 
         {upcomingAppointments && upcomingAppointments.length > 0 ? (
           <View>
@@ -1141,7 +1178,6 @@ const DashboardScreen = () => {
               </Text>
             </View>
             <View style={styles.headerRightContainer}>
-
               <TouchableOpacity
                 style={styles.profileButton}
                 onPress={() => navigation.navigate("Profile", {
@@ -1227,43 +1263,59 @@ const DashboardScreen = () => {
             {/* Quick Actions Grid */}
             <Text style={styles.sectionTitle}>Quick Actions</Text>
             <View style={styles.actionsGrid}>
-  {getQuickActions().map((action) => {
-    // Skip rendering if it's a super admin only action and user isn't super admin
-    const isSuperAdmin = user?.accessLevel?.toLowerCase() === 'super admin' || 
-                        user?.email === 'kathipallimadhu@gmail.com';
-    
-    if (action.superAdminOnly && !isSuperAdmin) {
-      return null;
-    }
+              {getQuickActions().map((action, index, array) => {
+                const isSuperAdmin = user?.accessLevel?.toLowerCase() === 'super admin' || 
+                                  user?.email === 'kathipallimadhu@gmail.com';
+                
+                if (action.superAdminOnly && !isSuperAdmin) {
+                  return null;
+                }
 
-    return (
-      <TouchableOpacity
-        key={action.id}
-        style={[styles.actionCard, { backgroundColor: action.bgColor }]}
-        onPress={() => {
-          if (action.route === 'UserAccessManagement') {
-            navigation.navigate('UserAccessManagement', {
-              userAccess: user.accessLevel || 'Basic Admin'
-            });
-          } else if (action.route === 'MarkAttendance') {
-            handleAttendanceNavigation();
-          } else {
-            navigation.navigate(action.route, action.params);
-          }
-        }}
-      >
-        <Icon name={action.icon} size={24} color="#fff" />
-        <Text style={styles.actionText}>{action.label}</Text>
-      </TouchableOpacity>
-    );
-  })}
-</View>
+                // Calculate if this is in the last row
+                const totalVisibleActions = array.filter(a => !(a.superAdminOnly && !isSuperAdmin)).length;
+                const itemsPerRow = 2; // Since we're using 48% width, we get 2 items per row
+                const isInLastRow = Math.floor(index / itemsPerRow) === Math.floor((totalVisibleActions - 1) / itemsPerRow);
 
-            <View style={styles.sectionHeader}>
+                return (
+                  <TouchableOpacity
+                    key={`${action.id}-${Date.now()}`}
+                    style={[
+                      styles.actionCard,
+                      { backgroundColor: action.bgColor },
+                      isInLastRow && styles.lastRowCard
+                    ]}
+                    onPress={() => {
+                      if (action.route === 'UserAccessManagement') {
+                        navigation.navigate(action.route, {
+                          key: `UserAccess-${Date.now()}`,
+                          userAccess: user.accessLevel || 'Basic Admin'
+                        });
+                      } else if (action.route === 'MarkAttendance') {
+                        handleAttendanceNavigation();
+                      } else {
+                        navigation.navigate(action.route, action.params);
+                      }
+                    }}
+                  >
+                    <Icon name={action.icon} size={24} color="#fff" />
+                    <Text style={styles.actionText}>{action.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Today's Tasks Section */}
+            <TouchableOpacity 
+              style={styles.sectionHeader}
+              onPress={() => navigation.navigate('MyTasksScreen')}
+            >
               <Text style={styles.sectionTitle}>Today's Tasks</Text>
               <Text style={styles.taskCountBadge}>{todayTasks.length} tasks</Text>
-            </View>
-            <View style={styles.tasksContainer}>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.tasksContainer}
+              onPress={() => navigation.navigate('MyTasksScreen')}
+            >
               {todayTasks.length > 0 ? (
                 todayTasks.map((item) => (
                   <View
@@ -1273,9 +1325,12 @@ const DashboardScreen = () => {
                       item.completed && styles.completedTaskItem
                     ]}
                   >
-                    <TouchableOpacity
-                      onPress={() => toggleTaskCompletion(item.id)}
+                    <TouchableOpacity 
                       style={styles.taskCheckbox}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        toggleTaskCompletion(item.id);
+                      }}
                     >
                       <Icon
                         name={item.completed ? "check-circle" : "circle"}
@@ -1322,48 +1377,10 @@ const DashboardScreen = () => {
                   <Text style={styles.noTasksText}>No tasks for today</Text>
                 </View>
               )}
-            </View>
+            </TouchableOpacity>
 
+            {/* Appointments Section */}
             {renderAppointmentsSection()}
-
-            {/* Announcements */}
-            <Text style={styles.sectionTitle}>Announcements</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              nestedScrollEnabled={true}
-              style={styles.horizontalScroll}
-            >
-              {announcements
-                .filter(item => item.forRoles.includes(user?.role?.toLowerCase() || 'student'))
-                .map((item) => (
-                  <View key={item.id} style={styles.announcementCard}>
-                    <Text style={styles.announcementTitle}>{item.title}</Text>
-                    <Text style={styles.announcementMeta}>
-                      {item.department} • {item.time}
-                    </Text>
-                  </View>
-                ))}
-            </ScrollView>
-
-            {/* Upcoming Events */}
-            <Text style={styles.sectionTitle}>Upcoming Events</Text>
-            <View style={styles.eventsContainer}>
-              {upcomingEvents
-                .filter(event => event.forRoles.includes(user?.role?.toLowerCase() || 'student'))
-                .map((event) => (
-                  <View key={event.id} style={styles.eventCard}>
-                    <View style={styles.eventIcon}>
-                      <Icon name="calendar-day" size={20} color="#1D3557" />
-                    </View>
-                    <View style={styles.eventDetails}>
-                      <Text style={styles.eventTitle}>{event.title}</Text>
-                      <Text style={styles.eventInfo}>{event.date}</Text>
-                      <Text style={styles.eventInfo}>{event.location}</Text>
-                    </View>
-                  </View>
-                ))}
-            </View>
           </ScrollView>
         </>
       ) : (
@@ -1385,53 +1402,52 @@ const styles = StyleSheet.create({
   },
   scrollViewContent: {
     flexGrow: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: '4%',
     paddingBottom: 40,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 20,
-    paddingTop: 40,
-    height: 140,
+    padding: '4%',
+    paddingTop: Platform.OS === 'ios' ? 50 : 40,
+    minHeight: Platform.OS === 'ios' ? 120 : 140,
     backgroundColor: "#1D3557",
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
     elevation: 5,
   },
   welcomeText: {
-    fontSize: 16,
+    fontSize: Platform.OS === 'ios' ? 14 : 16,
     color: "#A8DADC",
     marginBottom: 4,
   },
   greeting: {
-    fontSize: 24,
+    fontSize: Platform.OS === 'ios' ? 22 : 24,
     fontWeight: "700",
     color: "#fff",
     marginBottom: 4,
   },
   role: {
-    fontSize: 16,
+    fontSize: Platform.OS === 'ios' ? 14 : 16,
     color: "#E9ECEF",
     opacity: 0.9,
   },
   profileButton: {
     padding: 8,
-    borderRadius: 30,
-    width: 52,
-    height: 52,
+    borderRadius: 25,
+    width: Platform.OS === 'ios' ? 46 : 52,
+    height: Platform.OS === 'ios' ? 46 : 52,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#fff',
-
   },
   profileImage: {
-    width: 52,
-    height: 52,
-    borderRadius: 30,
+    width: '100%',
+    height: '100%',
+    borderRadius: 25,
     borderWidth: 1,
     borderColor: '#fff',
   },
@@ -1442,9 +1458,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     elevation: 4,
     borderRadius: 12,
+    marginHorizontal: '1%',
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: Platform.OS === 'ios' ? 16 : 18,
     fontWeight: 'bold',
     marginBottom: 16,
     color: '#1D3557',
@@ -1498,12 +1515,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 5,
+    marginTop: 0,  // Add this to remove any top margin
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: Platform.OS === 'ios' ? 16 : 18,
     fontWeight: "700",
     color: "#1D3557",
+    marginBottom: 5,
   },
   taskCountBadge: {
     backgroundColor: '#E9ECEF',
@@ -1517,36 +1536,43 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 0,
+    paddingBottom: 0,
+    paddingTop: 0,
   },
   actionCard: {
-    width: "48%",
+    width: '48%',
+    aspectRatio: 1.6,
     borderRadius: 10,
-    padding: 15,
-    marginBottom: 15,
+    padding: '1%',
+    marginBottom: '1%',
     alignItems: "center",
     justifyContent: "center",
     elevation: 2,
   },
+  lastRowCard: {
+    marginBottom: 0,
+  },
   actionText: {
     color: "#fff",
-    fontSize: 14,
-    marginTop: 8,
+    fontSize: Platform.OS === 'ios' ? 12 : 13,
+    marginTop: 4,
     fontWeight: "600",
     textAlign: "center",
   },
   tasksContainer: {
     backgroundColor: "#fff",
     borderRadius: 10,
-    padding: 15,
+    padding: '4%',
     elevation: 2,
     marginBottom: 20,
+    marginTop: 0, 
   },
   taskItem: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 12,
-    padding: 10,
+    padding: '3%',
     borderRadius: 8,
     backgroundColor: '#fff',
   },
@@ -1560,14 +1586,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   taskText: {
-    fontSize: 16,
+    fontSize: Platform.OS === 'ios' ? 14 : 16,
     color: "#1D3557",
     fontWeight: "500",
+    flexShrink: 1,
   },
   taskDescription: {
-    fontSize: 14,
+    fontSize: Platform.OS === 'ios' ? 12 : 14,
     color: '#6c757d',
     marginTop: 4,
+    flexShrink: 1,
   },
   completedTaskText: {
     textDecorationLine: "line-through",
@@ -1615,13 +1643,14 @@ const styles = StyleSheet.create({
   },
   horizontalScroll: {
     marginBottom: 20,
+    marginTop: 10,
   },
   announcementCard: {
     backgroundColor: "#fff",
     borderRadius: 10,
-    padding: 15,
+    padding: '4%',
     marginRight: 15,
-    width: 220,
+    width: 280,
     elevation: 2,
   },
   announcementTitle: {
@@ -1641,7 +1670,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     backgroundColor: "#fff",
     borderRadius: 10,
-    padding: 15,
+    padding: '4%',
     marginBottom: 15,
     elevation: 2,
   },
@@ -1864,7 +1893,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     backgroundColor: '#F8F9FA',
     borderRadius: 8,
-    padding: 12,
+    padding: '4%',
   },
   detailRow: {
     flexDirection: 'row',
@@ -1883,14 +1912,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
   detailLabel: {
-    fontSize: 14,
+    fontSize: Platform.OS === 'ios' ? 12 : 14,
     color: '#6C757D',
     flex: 1,
+    marginRight: 8,
   },
   detailValue: {
-    fontSize: 14,
+    fontSize: Platform.OS === 'ios' ? 12 : 14,
     color: '#1D3557',
     fontWeight: '500',
     flex: 2,

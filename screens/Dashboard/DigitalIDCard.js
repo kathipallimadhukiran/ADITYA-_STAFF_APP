@@ -115,8 +115,12 @@ const DigitalIDCard = ({ route }) => {
                 Valid till: {getCurrentAcademicYear().split('-')[1]}
               </Text>
             )}
-            {userData.qrCode && (
-              <Image source={{ uri: userData.qrCode }} style={styles.qrCode} />
+            {userData.qrCode && typeof userData.qrCode === 'string' && (
+              <Image 
+                source={{ uri: userData.qrCode }} 
+                style={styles.qrCode}
+                onError={(error) => console.warn('QR Code image error:', error)}
+              />
             )}
           </View>
         </Card>

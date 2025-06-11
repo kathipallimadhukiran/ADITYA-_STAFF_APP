@@ -38,8 +38,9 @@ const registerAndSavePushToken = async (user) => {
       return;
     }
 
-    // Save token to Firestore
-    await firebase.firestore().collection('users').doc(user.email).set(
+    // Save token to Firestore with lowercase email
+    const lowerEmail = user.email.toLowerCase().trim();
+    await firebase.firestore().collection('users').doc(lowerEmail).set(
       {
         expoPushToken,
       },
@@ -109,13 +110,14 @@ export const AuthProvider = ({ children }) => {
           if (firebaseUser && firebaseUser.emailVerified) {
             try {
               const idToken = await firebaseUser.getIdToken();
-              const userDoc = await firebase.firestore().collection('users').doc(firebaseUser.email).get();
+              const lowerEmail = firebaseUser.email.toLowerCase().trim();
+              const userDoc = await firebase.firestore().collection('users').doc(lowerEmail).get();
               
               if (userDoc.exists) {
                 const userData = userDoc.data();
                 const completeUser = {
                   uid: firebaseUser.uid,
-                  email: firebaseUser.email,
+                  email: lowerEmail,
                   emailVerified: firebaseUser.emailVerified,
                   token: idToken,
                   ...userData

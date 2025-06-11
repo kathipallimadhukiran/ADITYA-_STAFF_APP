@@ -13,11 +13,12 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import axios from 'axios';
 import { MaterialIcons } from '@expo/vector-icons';
+import { db } from '../../services/Firebase/firebaseConfig';
 
 const MAX_CAPTURES = 5;
 const { width } = Dimensions.get('window');
 const CIRCLE_SIZE = width * 0.7;
-const API_URL = 'http://192.168.29.44:5000'; // Update with your server IP
+const DEFAULT_API_URL = 'https://face-recognition-final.onrender.com';
 
 export default function FaceCaptureScreen({ navigation, route }) {
   const cameraRef = useRef(null);
@@ -27,21 +28,39 @@ export default function FaceCaptureScreen({ navigation, route }) {
   const [flashMode, setFlashMode] = useState('off');
   const [captureCount, setCaptureCount] = useState(0);
   const [trainingProgress, setTrainingProgress] = useState(0);
+  const [API_URL, setApiUrl] = useState(DEFAULT_API_URL);
+  const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState('');
   
- 
   const userName = route.params?.userName;
   const email = route.params?.email;
+
+  // Add effect to fetch API URL from Firebase
+  useEffect(() => {
+    const fetchApiUrl = async () => {
+      try {
+        const settingsDoc = await db.collection('settings').doc('api_config').get();
+        if (settingsDoc.exists) {
+          const { api_url } = settingsDoc.data();
+          if (api_url) {
+            console.log('[DEBUG] Using API URL from Firebase:', api_url);
+            setApiUrl(api_url);
+          }
+        }
+      } catch (error) {
+        console.log('[DEBUG] Error fetching API URL from Firebase, using default:', error);
+      }
+    };
+
+    fetchApiUrl();
+  }, []);
 
   useEffect(() => {
     // Validate required parameters
     if (!userName || !email) {
-      Alert.alert(
-        'Missing Information',
-        'User ID or Name is missing',
-        [
-          { text: 'OK', onPress: () => navigation.goBack() }
-        ]
-      );
+      setMessage('Missing user information. Please try again.');
+      setMessageType('error');
+      navigation.goBack();
       return;
     }
    
@@ -51,21 +70,9 @@ export default function FaceCaptureScreen({ navigation, route }) {
     const requestCameraAccess = async () => {
       const { granted } = await requestPermission();
       if (!granted) {
-        Alert.alert(
-          'Camera Permission Required',
-          'Please grant camera access to register your face.',
-          [
-            { 
-              text: 'Open Settings',
-              onPress: () => Linking.openSettings()
-            },
-            {
-              text: 'Cancel',
-              onPress: () => navigation.goBack(),
-              style: 'cancel'
-            }
-          ]
-        );
+        setMessage('Camera access is required to register your face.');
+        setMessageType('error');
+        navigation.goBack();
       }
     };
 
@@ -84,7 +91,11 @@ export default function FaceCaptureScreen({ navigation, route }) {
         exif: false,
       });
 
-      if (!photo.base64) throw new Error('No image data received');
+      if (!photo.base64) {
+        setMessage('Failed to capture image. Please try again.');
+        setMessageType('error');
+        return;
+      }
 
       const base64Image = `data:image/jpeg;base64,${photo.base64}`;
       
@@ -96,7 +107,8 @@ export default function FaceCaptureScreen({ navigation, route }) {
       }
     } catch (err) {
       console.error('Capture error:', err);
-      Alert.alert('Error', 'Failed to capture image');
+      setMessage('Failed to capture image. Please try again.');
+      setMessageType('error');
     } finally {
       setIsProcessing(false);
     }
@@ -104,7 +116,17 @@ export default function FaceCaptureScreen({ navigation, route }) {
 
   const processFaceTraining = async (images) => {
     if (!email || !userName) {
-      Alert.alert('Error', 'Missing user information');
+      Alert.alert(
+        'Error',
+        'Missing user information',
+        [
+          { text: 'Retry', onPress: () => {
+            setCapturedImages([]);
+            setCaptureCount(0);
+          }},
+          { text: 'Cancel', onPress: () => navigation.goBack() }
+        ]
+      );
       return;
     }
 
@@ -264,6 +286,12 @@ export default function FaceCaptureScreen({ navigation, route }) {
           </Text>
         </View>
       )}
+
+      {message && (
+        <View style={[styles.message, messageType === 'error' && styles.error, messageType === 'success' && styles.success]}>
+          {message}
+        </View>
+      )}
     </View>
   );
 }
@@ -378,5 +406,31 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     backgroundColor: '#00FFAA',
+  },
+  message: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    position: 'absolute',
+    top: 40,
+    left: 20,
+    right: 20,
+    zIndex: 100,
+  },
+  error: {
+    color: '#dc2626',
+    backgroundColor: '#fef2f2',
+    borderColor: '#dc2626',
+  },
+  success: {
+    color: '#16a34a',
+    backgroundColor: '#f0fdf4',
+    borderColor: '#16a34a',
   },
 });

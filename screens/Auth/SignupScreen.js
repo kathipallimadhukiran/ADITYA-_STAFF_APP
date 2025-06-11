@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { firebase } from '../../services/Firebase/firebaseConfig';
-import { saveUser, isEmailAuthorized, validateAdminCode, fetchDepartments } from '../../services/Firebase/firestoreService';
+import { saveUser, isEmailAuthorized, validateAdminCode, fetchRoleSpecificDepartments } from '../../services/Firebase/firestoreService';
 import { useNavigation, useRoute, CommonActions } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -26,6 +26,7 @@ const windowWidth = Dimensions.get('window').width;
 
 const EMAIL_DOMAINS = {
   student: ['@aec.edu.in'],
+  faculty: ['@aec.edu.in', '@gmail.com'],
   staff: ['@aec.edu.in', '@gmail.com'],
   admin: ['@aec.edu.in', '@gmail.com']
 };
@@ -49,28 +50,51 @@ export default function SignupScreen() {
   const [departments, setDepartments] = useState([]);
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [showDepartmentPicker, setShowDepartmentPicker] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   useEffect(() => {
     const loadDepartments = async () => {
       try {
         setLoading(true);
-        const depts = await fetchDepartments();
-        if (depts && depts.length > 0) {
-          setDepartments(depts);
-        } else {
-          Alert.alert('Warning', 'No departments found. Please contact support.');
+        let roleForDepartments;
+
+        // Map userType to the correct role for departments
+        switch (userType) {
+          case 'faculty':
+            roleForDepartments = 'faculty';
+            break;
+          case 'staff':
+            roleForDepartments = 'staff';
+            break;
+          case 'admin':
+            roleForDepartments = 'admin';
+            break;
+          case 'student':
+            roleForDepartments = 'faculty';
+            break;
+          default:
+            roleForDepartments = null;
+        }
+
+        if (roleForDepartments) {
+          const depts = await fetchRoleSpecificDepartments(roleForDepartments);
+          if (depts && depts.length > 0) {
+            setDepartments(depts);
+          } else {
+            setMessage(`No departments found for ${userType}. Please contact support.`);
+            setMessageType('error');
+          }
         }
       } catch (error) {
         console.error('Error loading departments:', error);
-        Alert.alert('Error', 'Failed to load departments. Please try again.');
+        setMessage('Failed to load departments. Please try again.');
+        setMessageType('error');
       } finally {
         setLoading(false);
       }
     };
 
-    if (userType === 'staff' || userType === 'admin') {
-      loadDepartments();
-    }
+    loadDepartments();
   }, [userType]);
 
   const isValidEmail = (email) => {
@@ -84,6 +108,8 @@ export default function SignupScreen() {
     switch (userType) {
       case 'student':
         return 'Student ID';
+      case 'faculty':
+        return 'Faculty ID';
       case 'staff':
         return 'Staff ID';
       case 'admin':
@@ -94,59 +120,47 @@ export default function SignupScreen() {
   };
 
   const handleSignup = async () => {
-    if (!email || !password || !confirmPassword || !name || !phoneNumber || !userId) {
-      Alert.alert('Error', 'Please fill in all required fields');
+    // Reset any previous error messages
+    setMessage('');
+    setMessageType('');
+
+    if (!email || !password || !confirmPassword || !name || !phoneNumber || !userId || !selectedDepartment) {
+      setMessage('Please fill in all required fields including department');
+      setMessageType('error');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      setMessage('Passwords do not match');
+      setMessageType('error');
       return;
     }
 
     if (!isValidEmail(email)) {
-      Alert.alert('Error', `Please use a valid ${userType} email address`);
+      setMessage(`Please use a valid ${userType} email address`);
+      setMessageType('error');
       return;
     }
 
     if (!isValidPhoneNumber(phoneNumber)) {
-      Alert.alert('Error', 'Please enter a valid 10-digit phone number');
-      return;
-    }
-
-    if (userType === 'admin' && !validateAdminCode(userId)) {
-      Alert.alert('Error', 'Invalid admin code');
-      return;
-    }
-
-    if ((userType === 'staff' || userType === 'admin') && !selectedDepartment) {
-      Alert.alert('Error', 'Please select a department');
+      setMessage('Please enter a valid 10-digit phone number');
+      setMessageType('error');
       return;
     }
 
     setLoading(true);
     try {
-      // Create user with Firebase Auth
       const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-      
-      // Save additional user data to Firestore
       await saveUser(email, name, userId, phoneNumber, userType, selectedDepartment);
-
-      // Send email verification
       await userCredential.user.sendEmailVerification();
 
       setMessageType('success');
-      setMessage('Account created successfully! Please verify your email before logging in.');
-
-      // Navigate back to login after a delay
-      setTimeout(() => {
-        navigation.navigate('Login');
-      }, 2000);
-
+      setMessage('Account created successfully! Please check your email for verification.');
+      setShowSuccessModal(true);
     } catch (error) {
       console.error('Signup error:', error);
       let errorMessage = 'An error occurred during signup';
-      
+
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'This email is already registered';
       } else if (error.code === 'auth/invalid-email') {
@@ -154,7 +168,7 @@ export default function SignupScreen() {
       } else if (error.code === 'auth/weak-password') {
         errorMessage = 'Password should be at least 6 characters';
       }
-      
+
       setMessageType('error');
       setMessage(errorMessage);
     } finally {
@@ -163,7 +177,7 @@ export default function SignupScreen() {
   };
 
   const renderDepartmentPicker = () => {
-    if (userType !== 'staff' && userType !== 'admin') return null;
+    const departmentLabel = userType === 'admin' ? 'Admin Role' : 'Department';
 
     return (
       <View style={styles.inputGroup}>
@@ -173,7 +187,7 @@ export default function SignupScreen() {
           disabled={loading}
         >
           <Text style={selectedDepartment ? styles.departmentText : styles.placeholderText}>
-            {selectedDepartment || 'Select Department *'}
+            {selectedDepartment || `Select ${departmentLabel} *`}
           </Text>
           <Icon name="chevron-down" size={24} color="#a1a1aa" />
         </TouchableOpacity>
@@ -187,42 +201,99 @@ export default function SignupScreen() {
           <TouchableWithoutFeedback onPress={() => setShowDepartmentPicker(false)}>
             <View style={styles.modalOverlay} />
           </TouchableWithoutFeedback>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Department</Text>
-            <FlatList
-              data={departments}
-              keyExtractor={(item) => item.id.toString()}
-              renderItem={({ item }) => (
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select {departmentLabel}</Text>
                 <TouchableOpacity
-                  style={styles.modalItem}
-                  onPress={() => {
-                    setSelectedDepartment(item.name);
-                    setShowDepartmentPicker(false);
-                  }}
+                  onPress={() => setShowDepartmentPicker(false)}
+                  style={styles.closeButton}
                 >
-                  <Text style={styles.modalItemText}>{item.name}</Text>
+                  <Icon name="close" size={24} color="#f97316" />
                 </TouchableOpacity>
-              )}
-            />
+              </View>
+              <FlatList
+                data={departments}
+                keyExtractor={(item) => item.id.toString()}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.modalItem,
+                      selectedDepartment === item.name && styles.selectedModalItem
+                    ]}
+                    onPress={() => {
+                      setSelectedDepartment(item.name);
+                      setShowDepartmentPicker(false);
+                    }}
+                  >
+                    <Text style={[
+                      styles.modalItemText,
+                      selectedDepartment === item.name && styles.selectedModalItemText
+                    ]}>
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                showsVerticalScrollIndicator={true}
+                contentContainerStyle={styles.modalList}
+              />
+            </View>
           </View>
         </Modal>
       </View>
     );
   };
 
+  const renderSuccessModal = () => (
+    <Modal
+      visible={showSuccessModal}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowSuccessModal(false)}
+    >
+      <View style={styles.successModalOverlay}>
+        <View style={styles.successModalContainer}>
+          <View style={styles.successIconContainer}>
+            <Icon name="checkmark-circle" size={80} color="#f97316" />
+          </View>
+
+          <Text style={styles.successModalTitle}>Registration Successful!</Text>
+
+          <Text style={styles.successModalMessage}>
+            Your account has been created successfully. A verification email has been sent to your email address.
+          </Text>
+
+          <Text style={styles.successModalSubMessage}>
+            Please verify your email to complete the registration process.
+          </Text>
+
+          <TouchableOpacity
+            style={styles.successModalButton}
+            onPress={() => {
+              setShowSuccessModal(false);
+              navigation.navigate('Login');
+            }}
+          >
+            <Text style={styles.successModalButtonText}>Go to Login</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.backButton}
               onPress={() => navigation.goBack()}
             >
               <Icon name="arrow-back" size={24} color="#f97316" />
             </TouchableOpacity>
 
-          <Text style={styles.heading}>ADITYA UNIVERSITY</Text>
+            <Text style={styles.heading}>ADITYA UNIVERSITY</Text>
             <Text style={styles.title}>{userType.charAt(0).toUpperCase() + userType.slice(1)} Sign Up</Text>
             <Text style={styles.instruction}>
               Only {userType}s with an official Aditya University email ({EMAIL_DOMAINS[userType].join(', ')}) can sign up.
@@ -233,7 +304,7 @@ export default function SignupScreen() {
               onChangeText={setName}
               value={name}
               style={styles.input}
-              placeholderTextColor="#a1a1aa"
+              placeholderTextColor="#666666"
               autoCapitalize="words"
               editable={!loading}
             />
@@ -245,7 +316,7 @@ export default function SignupScreen() {
               autoCapitalize="none"
               keyboardType="email-address"
               style={styles.input}
-              placeholderTextColor="#a1a1aa"
+              placeholderTextColor="#666666"
               editable={!loading}
             />
 
@@ -257,7 +328,7 @@ export default function SignupScreen() {
               value={phoneNumber}
               keyboardType="phone-pad"
               style={styles.input}
-              placeholderTextColor="#a1a1aa"
+              placeholderTextColor="#666666"
               editable={!loading}
               maxLength={10}
             />
@@ -267,7 +338,7 @@ export default function SignupScreen() {
               onChangeText={setUserId}
               value={userId}
               style={styles.input}
-              placeholderTextColor="#a1a1aa"
+              placeholderTextColor="#666666"
               editable={!loading}
               secureTextEntry={userType === 'admin'}
             />
@@ -279,7 +350,7 @@ export default function SignupScreen() {
                 value={password}
                 secureTextEntry={!showPassword}
                 style={styles.passwordInput}
-                placeholderTextColor="#a1a1aa"
+                placeholderTextColor="#666666"
                 editable={!loading}
               />
               <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon} activeOpacity={0.7}>
@@ -294,7 +365,7 @@ export default function SignupScreen() {
                 value={confirmPassword}
                 secureTextEntry={!showConfirmPassword}
                 style={styles.passwordInput}
-                placeholderTextColor="#a1a1aa"
+                placeholderTextColor="#666666"
                 editable={!loading}
               />
               <TouchableOpacity
@@ -333,6 +404,7 @@ export default function SignupScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
+      {renderSuccessModal()}
     </SafeAreaView>
   );
 }
@@ -436,16 +508,25 @@ const styles = StyleSheet.create({
     fontFamily: 'HelveticaNeue-Medium',
   },
   message: {
+    fontSize: 16,
+    fontWeight: '600',
     textAlign: 'center',
-    marginTop: 15,
-    fontSize: 14,
-    fontFamily: 'HelveticaNeue',
+    marginTop: 10,
+    marginBottom: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
   },
   error: {
     color: '#dc2626',
+    backgroundColor: '#fef2f2',
+    borderColor: '#dc2626',
   },
   success: {
     color: '#16a34a',
+    backgroundColor: '#f0fdf4',
+    borderColor: '#16a34a',
   },
   inputGroup: {
     marginBottom: 22,
@@ -476,53 +557,73 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   placeholderText: {
-    color: '#a1a1aa',
+    color: '#666666',
     fontSize: 17,
     fontFamily: 'HelveticaNeue',
     fontWeight: '400',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.25)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContainer: {
+    position: 'absolute',
+    top: '20%',
+    left: '5%',
+    right: '5%',
+    maxHeight: '60%',
+    backgroundColor: 'transparent',
   },
   modalContent: {
-    position: 'absolute',
-    top: '28%',
-    left: '7%',
-    right: '7%',
     backgroundColor: '#fff',
     borderRadius: 18,
-    padding: 22,
+    overflow: 'hidden',
     elevation: 12,
-    zIndex: 2000,
     shadowColor: '#ea580c',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.22,
     shadowRadius: 12,
   },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+    backgroundColor: '#fff7ed',
+  },
   modalTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 18,
     color: '#ea580c',
+    flex: 1,
     textAlign: 'center',
-    letterSpacing: 1,
+    marginRight: 24,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalList: {
+    paddingVertical: 8,
   },
   modalItem: {
     paddingVertical: 15,
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
-    alignItems: 'center',
   },
   modalItemText: {
-    fontSize: 18,
+    fontSize: 17,
     color: '#161616',
     fontFamily: 'HelveticaNeue',
-    fontWeight: '500',
   },
   selectedModalItem: {
-    backgroundColor: '#fef3c7',
-    borderRadius: 8,
+    backgroundColor: '#fff7ed',
+  },
+  selectedModalItemText: {
+    color: '#f97316',
+    fontWeight: '600',
   },
   loginLinkContainer: {
     marginTop: 18,
@@ -537,5 +638,78 @@ const styles = StyleSheet.create({
     color: '#f97316',
     fontWeight: 'bold',
     textDecorationLine: 'underline',
+  },
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  successModalContainer: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 24,
+    width: '90%',
+    maxWidth: 400,
+    alignItems: 'center',
+    elevation: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  successIconContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#fff7ed',
+    
+  
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  successModalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#f97316',
+    marginBottom: 16,
+    textAlign: 'center',
+    fontFamily: 'HelveticaNeue-Bold',
+  },
+  successModalMessage: {
+    fontSize: 16,
+    color: '#374151',
+    marginBottom: 12,
+    textAlign: 'center',
+    lineHeight: 22,
+    fontFamily: 'HelveticaNeue',
+  },
+  successModalSubMessage: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 24,
+    textAlign: 'center',
+    fontFamily: 'HelveticaNeue',
+  },
+  successModalButton: {
+    backgroundColor: '#f97316',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    width: '100%',
+    shadowColor: '#f97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  successModalButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+    fontFamily: 'HelveticaNeue-Medium',
   },
 });

@@ -48,7 +48,8 @@ const Attendance_fig_cam = () => {
   const [userData, setUserData] = useState(route.params?.userData || null);
   const cameraRef = useRef(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const API_URL = 'http://192.168.29.44:5000';
+  const DEFAULT_API_URL = 'https://face-recognition-final.onrender.com';
+  const [API_URL, setApiUrl] = useState(DEFAULT_API_URL);
   const [attendanceSettings, setAttendanceSettings] = useState({
     startTime: '09:00',
     endTime: '17:00',
@@ -66,6 +67,26 @@ const Attendance_fig_cam = () => {
     },
     holidays: []
   });
+
+  // Add effect to fetch API URL from Firebase
+  useEffect(() => {
+    const fetchApiUrl = async () => {
+      try {
+        const settingsDoc = await db.collection('settings').doc('api_config').get();
+        if (settingsDoc.exists) {
+          const { api_url } = settingsDoc.data();
+          if (api_url) {
+            console.log('[DEBUG] Using API URL from Firebase:', api_url);
+            setApiUrl(api_url);
+          }
+        }
+      } catch (error) {
+        console.log('[DEBUG] Error fetching API URL from Firebase, using default:', error);
+      }
+    };
+
+    fetchApiUrl();
+  }, []);
 
   // Fetch user data on component mount
   useEffect(() => {

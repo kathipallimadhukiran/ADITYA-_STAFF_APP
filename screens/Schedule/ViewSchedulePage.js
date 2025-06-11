@@ -6,9 +6,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+const getTodayDayName = () => {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const today = new Date().getDay(); // 0 is Sunday, 1 is Monday, etc.
+  return days[today === 0 ? 1 : today]; // If Sunday, return Monday instead
+};
+
 const ViewSchedulePage = () => {
   const navigation = useNavigation();
-  const [selectedDay, setSelectedDay] = useState(daysOfWeek[0]);
+  const [selectedDay, setSelectedDay] = useState(getTodayDayName());
   const [schedule, setSchedule] = useState({});
   const [loading, setLoading] = useState(true);
   const theme = useTheme();
@@ -160,17 +166,6 @@ const ViewSchedulePage = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Class Schedule</Text>
-        <IconButton
-          icon="calendar-sync"
-          size={24}
-          mode="contained"
-          containerColor={theme.colors.primaryContainer}
-          iconColor={theme.colors.primary}
-          onPress={loadSchedule}
-        />
-      </View>
       {renderDayTabs()}
       {renderScheduleCards()}
       <FAB
@@ -188,21 +183,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingRight: 8,
-    paddingTop: 8,
-    backgroundColor: 'white',
-    elevation: 2,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    padding: 16,
-    color: '#333',
   },
   tabsWrapper: {
     backgroundColor: 'white',
@@ -242,7 +222,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   selectedDayIndicator: {
-    backgroundColor: '#2196F3',
+    backgroundColor: '#f97316',
   },
   scheduleContainer: {
     flex: 1,
@@ -268,7 +248,7 @@ const styles = StyleSheet.create({
   timeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#fff7ed',
     paddingRight: 12,
     borderRadius: 20,
   },
@@ -278,7 +258,7 @@ const styles = StyleSheet.create({
   timeText: {
     fontSize: 15,
     fontWeight: '500',
-    color: '#2196F3',
+    color: '#f97316',
   },
   subjectText: {
     fontSize: 20,
@@ -312,7 +292,7 @@ const styles = StyleSheet.create({
     margin: 16,
     right: 0,
     bottom: 0,
-    backgroundColor: '#2196F3',
+    backgroundColor: '#f97316',
   },
   centerContainer: {
     flex: 1,
@@ -334,7 +314,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   addButton: {
-    backgroundColor: '#2196F3',
+    backgroundColor: '#f97316',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 25,

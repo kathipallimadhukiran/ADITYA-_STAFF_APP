@@ -5,6 +5,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 const RoleSelection = ({ navigation }) => {
   const roles = [
     { id: 'student', title: 'Student', icon: 'school', screen: 'StudentSignup' },
+    { id: 'faculty', title: 'Faculty', icon: 'book', screen: 'FacultySignup' },
     { id: 'staff', title: 'Staff', icon: 'briefcase', screen: 'StaffSignup' },
     { id: 'admin', title: 'Admin', icon: 'shield', screen: 'AdminSignup' },
   ];
@@ -28,7 +29,7 @@ const RoleSelection = ({ navigation }) => {
             <TouchableOpacity
               key={role.id}
               style={styles.button}
-              onPress={() => navigation.navigate(role.screen)}
+              onPress={() => navigation.navigate(role.screen, { userType: role.id })}
             >
               <Icon name={role.icon} size={24} color="#fff" />
               <Text style={styles.buttonText}>{role.title}</Text>

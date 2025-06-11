@@ -15,6 +15,7 @@ import { getAuth } from 'firebase/auth';
 import { db } from '../../services/Firebase/firebaseConfig';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import * as Location from 'expo-location';
+import { startLocationTracking, stopLocationTracking } from '../../services/LocationService';
 
 const LocationTracker = () => {
   const [location, setLocation] = useState(null);
@@ -27,9 +28,7 @@ const LocationTracker = () => {
   const currentUser = auth.currentUser;
 
   useEffect(() => {
-    let locationSubscription = null;
-
-    const getLocationAsync = async () => {
+    const initializeTracking = async () => {
       try {
         setLoading(true);
         setErrorMsg(null);
@@ -42,40 +41,10 @@ const LocationTracker = () => {
           return;
         }
 
-        // Get current position
-        let currentLocation = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-
-        setLocation(currentLocation);
+        // Use the centralized location service
+        await startLocationTracking();
         setStatus('active');
         setLastUpdate(new Date());
-
-        // Save to Firestore
-        if (currentUser) {
-          await addDoc(collection(db, 'locations'), {
-            userId: currentUser.uid,
-            userRole: 'staff',
-            latitude: currentLocation.coords.latitude,
-            longitude: currentLocation.coords.longitude,
-            status: 'active',
-            timestamp: serverTimestamp(),
-            location: 'Current Location',
-          });
-        }
-
-        // Start watching position
-        locationSubscription = await Location.watchPositionAsync(
-          {
-            accuracy: Location.Accuracy.Balanced,
-            timeInterval: 5000,
-            distanceInterval: 10,
-          },
-          (newLocation) => {
-            setLocation(newLocation);
-            setLastUpdate(new Date());
-          }
-        );
       } catch (error) {
         console.error('Error:', error);
         setErrorMsg(error.message || 'Error getting location');
@@ -84,13 +53,11 @@ const LocationTracker = () => {
       }
     };
 
-    getLocationAsync();
+    initializeTracking();
 
     // Cleanup
     return () => {
-      if (locationSubscription) {
-        locationSubscription.remove();
-      }
+      // No need to cleanup as the LocationService handles this
     };
   }, []);
 
