@@ -15,11 +15,13 @@ import {
   Image,
   Animated,
   Easing,
+  ScrollView,
 } from 'react-native';
 import { Card } from 'react-native-paper';
 import { firebase } from '../../services/Firebase/firebaseConfig';
 import Icon from 'react-native-vector-icons/FontAwesome5';
 import * as Location from 'expo-location';
+import { WebView } from 'react-native-webview';
 
 export default function ViewLocationsScreen() {
   const [usersByRole, setUsersByRole] = useState({}); // Users grouped by role then department
@@ -33,6 +35,9 @@ export default function ViewLocationsScreen() {
   const [locationLoading, setLocationLoading] = useState(false);
   const rotationAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
+  const [dot1Opacity] = useState(new Animated.Value(0.3));
+  const [dot2Opacity] = useState(new Animated.Value(0.3));
+  const [dot3Opacity] = useState(new Animated.Value(0.3));
 
   const getLocationName = async (latitude, longitude) => {
     try {
@@ -79,8 +84,16 @@ export default function ViewLocationsScreen() {
       setLocationLoading(true);
       const db = firebase.firestore();
       
+      // First get the user document to get the phone number
+      const userDoc = await db
+        .collection('users')
+        .doc(email.toLowerCase())
+        .get();
+
+      const userData = userDoc.exists ? userDoc.data() : {};
+      
       const locationDoc = await db
-        .collection('locations') // Updated collection name to match LocationService
+        .collection('locations')
         .doc(email.toLowerCase())
         .get();
 
@@ -101,9 +114,12 @@ export default function ViewLocationsScreen() {
           altitude: currentLocation.altitude || 0,
           lastUpdate: currentLocation.timestamp || null,
           locationName: locationName,
+          phoneNumber: userData.phoneNumber || 'Not available'  // Include phone number from user document
         };
       }
-      return null;
+      return {
+        phoneNumber: userData.phoneNumber || 'Not available'  // Include phone number even if location doesn't exist
+      };
     } catch (error) {
       console.error('Error fetching location:', error);
       return null;
@@ -144,7 +160,8 @@ export default function ViewLocationsScreen() {
           email: userData.email,
           role: role,
           department: dept,
-          profilePhoto: userData.profilePhoto || null
+          profilePhoto: userData.profilePhoto || null,
+          phoneNumber: userData.phoneNumber || 'Not available'
         });
       });
 
@@ -185,7 +202,7 @@ export default function ViewLocationsScreen() {
             useNativeDriver: true,
           }),
           Animated.timing(opacityAnim, {
-            toValue: 0.3,
+            toValue: 0.6,
             duration: 1000,
             easing: Easing.ease,
             useNativeDriver: true,
@@ -196,6 +213,60 @@ export default function ViewLocationsScreen() {
 
     startAnimations();
   }, []);
+
+  useEffect(() => {
+    const animateDots = () => {
+      const duration = 600;
+      
+      Animated.loop(
+        Animated.sequence([
+          // First dot
+          Animated.sequence([
+            Animated.timing(dot1Opacity, {
+              toValue: 1,
+              duration: duration / 3,
+              useNativeDriver: true,
+            }),
+            Animated.timing(dot1Opacity, {
+              toValue: 0.3,
+              duration: duration / 3,
+              useNativeDriver: true,
+            }),
+          ]),
+          // Second dot
+          Animated.sequence([
+            Animated.timing(dot2Opacity, {
+              toValue: 1,
+              duration: duration / 3,
+              useNativeDriver: true,
+            }),
+            Animated.timing(dot2Opacity, {
+              toValue: 0.3,
+              duration: duration / 3,
+              useNativeDriver: true,
+            }),
+          ]),
+          // Third dot
+          Animated.sequence([
+            Animated.timing(dot3Opacity, {
+              toValue: 1,
+              duration: duration / 3,
+              useNativeDriver: true,
+            }),
+            Animated.timing(dot3Opacity, {
+              toValue: 0.3,
+              duration: duration / 3,
+              useNativeDriver: true,
+            }),
+          ]),
+        ])
+      ).start();
+    };
+
+    if (locationLoading) {
+      animateDots();
+    }
+  }, [locationLoading]);
 
   const spin = rotationAnim.interpolate({
     inputRange: [0, 1],
@@ -208,9 +279,13 @@ export default function ViewLocationsScreen() {
   };
 
   const handleUserSelect = async (user) => {
+    setSelectedUser(user); // Set the user data immediately
+    setLocationLoading(true); // Show loading state
+    setModalVisible(true); // Show modal immediately
+    
     const locationData = await fetchUserLocation(user.email);
-    setSelectedUser({ ...user, ...locationData });
-    setModalVisible(true);
+    setSelectedUser(prev => ({ ...prev, ...locationData })); // Update with location data
+    setLocationLoading(false);
   };
 
   // Function to format timestamp with status color
@@ -425,74 +500,97 @@ export default function ViewLocationsScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <View style={styles.headerLeft}>
-                <View style={styles.modalAvatarContainer}>
-                  {selectedUser.profilePhoto ? (
-                    <Image
-                      source={{ uri: selectedUser.profilePhoto }}
-                      style={styles.modalAvatar}
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.modalHeader}>
+                <View style={styles.headerLeft}>
+                  <View style={styles.modalAvatarContainer}>
+                    {selectedUser.profilePhoto ? (
+                      <Image
+                        source={{ uri: selectedUser.profilePhoto }}
+                        style={styles.modalAvatar}
+                      />
+                    ) : (
+                      <View style={[styles.modalAvatar, styles.defaultAvatar]}>
+                        <Icon name="user" size={24} color="#457B9D" />
+                      </View>
+                    )}
+                    <Animated.View 
+                      style={[
+                        styles.modalStatusStroke,
+                        {
+                          opacity: opacityAnim,
+                          transform: [{ rotate: spin }]
+                        }
+                      ]} 
                     />
-                  ) : (
-                    <View style={[styles.modalAvatar, styles.defaultAvatar]}>
-                      <Icon name="user" size={24} color="#457B9D" />
-                    </View>
-                  )}
-                  <Animated.View 
-                    style={[
-                      styles.modalStatusStroke,
-                      {
-                        opacity: opacityAnim,
-                        transform: [{ rotate: spin }]
-                      }
-                    ]} 
-                  />
-                  <Animated.View 
-                    style={[
-                      styles.modalStatusStrokeGlow,
-                      {
-                        opacity: opacityAnim,
-                      }
-                    ]} 
-                  />
+                    <Animated.View 
+                      style={[
+                        styles.modalStatusStrokeGlow,
+                        {
+                          opacity: opacityAnim,
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <View style={styles.headerTextContainer}>
+                    <Text style={styles.modalTitle}>{selectedUser.name}</Text>
+                  </View>
                 </View>
-                <View style={styles.headerTextContainer}>
-                  <Text style={styles.modalTitle}>{selectedUser.name}</Text>
+                <TouchableOpacity 
+                  onPress={() => setModalVisible(false)}
+                  style={styles.closeButton}
+                >
+                  <Icon name="times" size={20} color="#1D3557" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.staffInfo}>
+                <View style={styles.infoRow}>
+                  <Icon name="user-tie" size={16} color="#457B9D" />
+                  <Text style={styles.infoLabel}>Role:</Text>
+                  <Text style={styles.infoValue}>{selectedUser.role}</Text>
+                </View>
+                
+                <View style={styles.infoRow}>
+                  <Icon name="building" size={16} color="#457B9D" />
+                  <Text style={styles.infoLabel}>Department:</Text>
+                  <Text style={styles.infoValue}>{selectedUser.department}</Text>
+                </View>
+                
+                <View style={styles.infoRow}>
+                  <Icon name="envelope" size={16} color="#457B9D" />
+                  <Text style={styles.infoLabel}>Email:</Text>
+                  <Text style={styles.infoValue}>{selectedUser.email}</Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Icon name="phone" size={16} color="#457B9D" />
+                  <Text style={styles.infoLabel}>Phone:</Text>
+                  <Text style={styles.infoValue}>{selectedUser.phoneNumber}</Text>
+                  <TouchableOpacity 
+                    style={styles.callButton}
+                    onPress={() => Linking.openURL(`tel:${selectedUser.phoneNumber}`)}
+                  >
+                    <Icon name="phone" size={16} color="#FFFFFF" />
+                    <Text style={styles.callButtonText}>Call</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
-              <TouchableOpacity 
-                onPress={() => setModalVisible(false)}
-                style={styles.closeButton}
-              >
-                <Icon name="times" size={20} color="#1D3557" />
-              </TouchableOpacity>
-            </View>
 
-            {locationLoading ? (
-              <ActivityIndicator size="large" color="#1D3557" />
-            ) : (
-              <>
-                <View style={styles.staffInfo}>
-                  <View style={styles.infoRow}>
-                    <Icon name="user-tie" size={16} color="#457B9D" />
-                    <Text style={styles.infoLabel}>Role:</Text>
-                    <Text style={styles.infoValue}>{selectedUser.role}</Text>
-                  </View>
-                  
-                  <View style={styles.infoRow}>
-                    <Icon name="building" size={16} color="#457B9D" />
-                    <Text style={styles.infoLabel}>Department:</Text>
-                    <Text style={styles.infoValue}>{selectedUser.department}</Text>
-                  </View>
-                  
-                  <View style={styles.infoRow}>
-                    <Icon name="envelope" size={16} color="#457B9D" />
-                    <Text style={styles.infoLabel}>Email:</Text>
-                    <Text style={styles.infoValue}>{selectedUser.email}</Text>
+              {locationLoading ? (
+                <View style={styles.loadingLocationContainer}>
+                  <ActivityIndicator size="large" color="#1D3557" />
+                  <Text style={styles.loadingText}>
+                    Tracking {selectedUser.name}'s location...
+                  </Text>
+                  <View style={styles.loadingDotsContainer}>
+                    <Animated.View style={[styles.loadingDot, { opacity: dot1Opacity }]} />
+                    <Animated.View style={[styles.loadingDot, { opacity: dot2Opacity }]} />
+                    <Animated.View style={[styles.loadingDot, { opacity: dot3Opacity }]} />
                   </View>
                 </View>
-
-                {selectedUser.latitude && selectedUser.longitude && (
+              ) : (
+                selectedUser.latitude && selectedUser.longitude && (
                   <View style={styles.locationCard}>
                     <View style={styles.locationHeader}>
                       <Icon name="map-marked-alt" size={20} color="#457B9D" />
@@ -500,6 +598,90 @@ export default function ViewLocationsScreen() {
                     </View>
 
                     <View style={styles.locationDetails}>
+                      <View style={styles.mapContainer}>
+                        <WebView
+                          style={styles.map}
+                          source={{
+                            html: `
+                              <!DOCTYPE html>
+                              <html>
+                                <head>
+                                  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                                  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+                                  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+                                  <style>
+                                    html, body {
+                                      margin: 0;
+                                      padding: 0;
+                                      width: 100%;
+                                      height: 100%;
+                                      background: #f5f5f5;
+                                    }
+                                    #map {
+                                      width: 100%;
+                                      height: 100%;
+                                      background: #f5f5f5;
+                                    }
+                                  </style>
+                                </head>
+                                <body>
+                                  <div id="map"></div>
+                                  <script>
+                                    try {
+                                      // Initialize the map
+                                      var map = L.map('map', {
+                                        zoomControl: true,
+                                        attributionControl: false
+                                      }).setView([${selectedUser.latitude}, ${selectedUser.longitude}], 18);
+
+                                      // Add the satellite layer
+                                      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                                        maxZoom: 19
+                                      }).addTo(map);
+
+                                      // Add a marker
+                                      var marker = L.marker([${selectedUser.latitude}, ${selectedUser.longitude}])
+                                        .addTo(map)
+                                        .bindPopup("${selectedUser.name}<br>${selectedUser.locationName || 'Location unavailable'}")
+                                        .openPopup();
+
+                                      // Notify React Native that map is loaded
+                                      window.ReactNativeWebView.postMessage('Map loaded successfully');
+                                    } catch (error) {
+                                      window.ReactNativeWebView.postMessage('Error: ' + error.message);
+                                    }
+                                  </script>
+                                </body>
+                              </html>
+                            `
+                          }}
+                          onMessage={(event) => {
+                            console.log('WebView message:', event.nativeEvent.data);
+                          }}
+                          onError={(syntheticEvent) => {
+                            const { nativeEvent } = syntheticEvent;
+                            console.warn('WebView error:', nativeEvent);
+                          }}
+                          onHttpError={(syntheticEvent) => {
+                            const { nativeEvent } = syntheticEvent;
+                            console.warn('WebView HTTP error:', nativeEvent);
+                          }}
+                          renderLoading={() => (
+                            <View style={[styles.mapContainer, styles.loadingContainer]}>
+                              <ActivityIndicator size="large" color="#1D3557" />
+                            </View>
+                          )}
+                          startInLoadingState={true}
+                          javaScriptEnabled={true}
+                          domStorageEnabled={true}
+                          scalesPageToFit={true}
+                          scrollEnabled={false}
+                          bounces={false}
+                          showsHorizontalScrollIndicator={false}
+                          showsVerticalScrollIndicator={false}
+                        />
+                      </View>
+
                       <View style={styles.locationRow}>
                         <Icon name="map-marker-alt" size={16} color="#457B9D" />
                         <View style={styles.locationTextContainer}>
@@ -539,12 +721,64 @@ export default function ViewLocationsScreen() {
                       </View>
                     </View>
                   </View>
-                )}
-              </>
-            )}
+                )
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
+    );
+  };
+
+  // Add this new function to render search results
+  const renderSearchResults = () => {
+    const allUsers = [];
+    Object.keys(usersByRole).forEach(role => {
+      Object.keys(usersByRole[role]).forEach(dept => {
+        allUsers.push(...usersByRole[role][dept]);
+      });
+    });
+
+    const filteredUsers = allUsers.filter(user =>
+      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    return (
+      <FlatList
+        data={filteredUsers}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item: user }) => (
+          <TouchableOpacity onPress={() => handleUserSelect(user)}>
+            <Card style={styles.userCard}>
+              <Card.Content>
+                <View style={styles.userInfo}>
+                  <View style={styles.userBasicInfo}>
+                    <View style={styles.avatarContainer}>
+                      {user.profilePhoto ? (
+                        <Image
+                          source={{ uri: user.profilePhoto }}
+                          style={styles.userAvatar}
+                        />
+                      ) : (
+                        <View style={[styles.userAvatar, styles.defaultAvatar]}>
+                          <Icon name="user" size={20} color="#457B9D" />
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.userTextInfo}>
+                      <Text style={styles.userName}>{user.name}</Text>
+                      <Text style={styles.userEmail}>{user.email}</Text>
+                    </View>
+                  </View>
+                  <Icon name="chevron-right" size={16} color="#6C757D" />
+                </View>
+              </Card.Content>
+            </Card>
+          </TouchableOpacity>
+        )}
+        contentContainerStyle={styles.listContainer}
+      />
     );
   };
 
@@ -577,19 +811,23 @@ export default function ViewLocationsScreen() {
         ) : null}
       </View>
 
-      <FlatList
-        data={Object.keys(usersByRole)}
-        renderItem={renderRoleSection}
-        keyExtractor={(item) => item}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#1D3557']}
-          />
-        }
-        contentContainerStyle={styles.listContainer}
-      />
+      {searchQuery ? (
+        renderSearchResults()
+      ) : (
+        <FlatList
+          data={Object.keys(usersByRole)}
+          renderItem={renderRoleSection}
+          keyExtractor={(item) => item}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#1D3557']}
+            />
+          }
+          contentContainerStyle={styles.listContainer}
+        />
+      )}
 
       {renderUserDetails()}
     </View>
@@ -603,9 +841,14 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   loadingContainer: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5f5f5',
   },
   searchContainer: {
     flexDirection: 'row',
@@ -712,9 +955,11 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   modalAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: Dimensions.get('window').width * 0.15,
+    height: Dimensions.get('window').width * 0.15,
+    borderRadius: Dimensions.get('window').width * 0.075,
+    maxWidth: 60,
+    maxHeight: 60,
   },
   modalStatusStroke: {
     position: 'absolute',
@@ -802,20 +1047,23 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
-    width: Dimensions.get('window').width * 0.9,
-    maxHeight: Dimensions.get('window').height * 0.8,
+    borderRadius: Math.min(20, Dimensions.get('window').width * 0.05),
+    padding: Math.min(10, Dimensions.get('window').width * 0.03),
+    width: Dimensions.get('window').width > 600 ? 580 : Dimensions.get('window').width * 0.9,
+    maxHeight: Dimensions.get('window').height * 0.85,
     elevation: 5,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: Math.min(15, Dimensions.get('window').height * 0.02),
+    marginTop: Math.min(10, Dimensions.get('window').height * 0.015),
+    marginLeft: Math.min(10, Dimensions.get('window').width * 0.03),
+    marginRight: Math.min(10, Dimensions.get('window').width * 0.03),
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: Math.min(24, Dimensions.get('window').width * 0.06),
     fontWeight: 'bold',
     color: '#1D3557',
   },
@@ -824,9 +1072,9 @@ const styles = StyleSheet.create({
   },
   staffInfo: {
     backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
+    borderRadius: Math.min(12, Dimensions.get('window').width * 0.03),
+    padding: Math.min(16, Dimensions.get('window').width * 0.04),
+    marginBottom: Math.min(20, Dimensions.get('window').height * 0.025),
   },
   infoRow: {
     flexDirection: 'row',
@@ -846,9 +1094,9 @@ const styles = StyleSheet.create({
   },
   locationCard: {
     backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 10,
+    borderRadius: Math.min(12, Dimensions.get('window').width * 0.03),
+    padding: Math.min(16, Dimensions.get('window').width * 0.04),
+    marginTop: Math.min(10, Dimensions.get('window').height * 0.015),
   },
   locationHeader: {
     flexDirection: 'row',
@@ -866,6 +1114,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
   },
+  mapContainer: {
+    height: Math.min(200, Dimensions.get('window').height * 0.25),
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 12,
+    backgroundColor: '#f5f5f5',
+  },
+  map: {
+    flex: 1,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+  },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -876,12 +1136,12 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   locationName: {
-    fontSize: 16,
+    fontSize: Math.min(16, Dimensions.get('window').width * 0.04),
     color: '#1D3557',
     fontWeight: '500',
   },
   coordinatesText: {
-    fontSize: 12,
+    fontSize: Math.min(12, Dimensions.get('window').width * 0.03),
     color: '#6C757D',
     marginTop: 2,
   },
@@ -911,15 +1171,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#457B9D',
-    padding: 12,
+    padding: Math.min(12, Dimensions.get('window').width * 0.03),
     borderRadius: 8,
-    marginTop: 12,
-    marginBottom: 8,
+    marginTop: Math.min(12, Dimensions.get('window').height * 0.015),
+    marginBottom: Math.min(8, Dimensions.get('window').height * 0.01),
   },
   mapsButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: Math.min(16, Dimensions.get('window').width * 0.04),
     fontWeight: '600',
     marginLeft: 8,
+  },
+  loadingLocationContainer: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8F9FA',
+    borderRadius: Math.min(12, Dimensions.get('window').width * 0.03),
+    marginTop: Math.min(10, Dimensions.get('window').height * 0.015),
+    minHeight: 150,
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: Math.min(16, Dimensions.get('window').width * 0.04),
+    color: '#1D3557',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  loadingDotsContainer: {
+    flexDirection: 'row',
+    marginTop: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#1D3557',
+    marginHorizontal: 4,
+    opacity: 0.3,
+  },
+  callButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#28A745',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  callButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
   },
 }); 

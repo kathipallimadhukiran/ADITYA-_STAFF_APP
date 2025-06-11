@@ -148,6 +148,15 @@ export default function SignupScreen() {
       return;
     }
 
+    // Add admin code validation
+    if (userType === 'admin') {
+      if (!validateAdminCode(userId)) {
+        setMessage('Invalid admin code. Please check and try again.');
+        setMessageType('error');
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
