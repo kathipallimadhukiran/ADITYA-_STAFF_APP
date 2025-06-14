@@ -89,17 +89,28 @@ const ProfileScreen = () => {
 
   const handleLogout = async () => {
     try {
-      const auth = getAuth();
-      if (!auth) {
-        throw new Error("Auth not initialized");
-      }
-      await auth.signOut();
-      await AsyncStorage.removeItem("@auth_user");
-      console.log("User signed out!");
-      
-      // Instead of using navigation.reset, we'll let App.js handle the navigation
-      // The onAuthStateChanged listener in App.js will detect the signOut
-      // and automatically show the login screen
+      // Clear all AsyncStorage data
+      await AsyncStorage.multiRemove([
+        '@user_data',
+        '@is_logged_in',
+        '@auth_user',
+        'userEmail',
+        'locationData',
+        'lastLocationUpdate',
+        'attendanceData',
+        'lastAttendanceUpdate'
+      ]);
+
+      // Clear user context
+      setUserData(null);
+
+      // Navigate to login screen and clear navigation stack
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+
+      console.log("User signed out successfully!");
     } catch (error) {
       console.error("Logout Error:", error);
       Alert.alert("Error", "Failed to logout. Please try again.");

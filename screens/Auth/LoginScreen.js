@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, ScrollView, Alert, Modal } from 'react-native';
-import LottieView from 'lottie-react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, ScrollView, Alert, Modal, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { firebase } from '../../services/Firebase/firebaseConfig';
 import { fetchUser, isEmailAuthorized, updateUserLastLogin, checkAdminVerificationStatus } from '../../services/Firebase/firestoreService';
@@ -14,6 +13,7 @@ import { Dimensions, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../services/Firebase/firebaseConfig';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const LoginScreen = () => {
   const { setUser } = useUser();
@@ -140,15 +140,25 @@ const LoginScreen = () => {
 
       console.log('[DEBUG] Setting user context:', completeUser);
 
+      // Save user data to AsyncStorage
+      await AsyncStorage.setItem('@user_data', JSON.stringify(completeUser));
+      await AsyncStorage.setItem('@is_logged_in', 'true');
+
       // First persist the session
-      await setAuthState(completeUser);
+      await setAuthState(completeUser, password);
 
       // Then update the context
       setUser(completeUser);
 
-      // Navigate to appropriate dashboard
-      const dashboardScreen = getDashboardScreen(userData.role);
-      navigation.navigate(dashboardScreen);
+      // Navigate to appropriate dashboard based on role
+      const dashboardScreen = `${completeUser.role.charAt(0).toUpperCase() + completeUser.role.slice(1)}Dashboard`;
+      console.log('[DEBUG] Navigating to dashboard:', dashboardScreen);
+      
+      // Reset navigation stack and navigate to dashboard
+      navigation.reset({
+        index: 0,
+        routes: [{ name: dashboardScreen }],
+      });
 
     } catch (error) {
       console.error('Login error:', error);
@@ -381,12 +391,11 @@ const LoginScreen = () => {
         <ScrollView contentContainerStyle={styles.scrollContainer}>
           <Text style={styles.heading}>ADITYA UNIVERSITY</Text>
 
-          <View style={styles.lottieContainer}>
-            <LottieView
-              source={require('../../assets/lottie/loginlottie.json')}
-              autoPlay
-              loop
-              style={styles.lottie}
+          <View style={styles.logoContainer}>
+            <Image
+              source={require('../../assets/college-logo.png')}
+              style={styles.logo}
+              resizeMode="contain"
             />
           </View>
 
@@ -495,19 +504,21 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: 36,
     fontWeight: '900',
-    color: '#ea580c',
+    color: '#C19539',
     textAlign: 'center',
     letterSpacing: 3,
     marginBottom: 25,
     fontFamily: 'HelveticaNeue-Bold',
   },
-  lottieContainer: {
+  logoContainer: {
     alignItems: 'center',
     marginBottom: 25,
+    width: '100%',
+    height: 200, // Adjust this value based on your needs
   },
-  lottie: {
-    width: windowWidth * 0.6,
-    height: windowWidth * 0.6,
+  logo: {
+    width: '80%',
+    height: '100%',
   },
   title: {
     fontSize: 30,

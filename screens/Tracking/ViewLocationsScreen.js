@@ -867,6 +867,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     color: '#1D3557',
+    placeholderTextColor: '#6C757D',
   },
   clearButton: {
     padding: 8,

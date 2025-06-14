@@ -1,14 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { View, LogBox, Platform, ActivityIndicator, StatusBar } from 'react-native';
+import { NavigationContainer, useNavigation } from '@react-navigation/native';
+import { View, LogBox, Platform, ActivityIndicator, StatusBar, Text, TouchableOpacity } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AppNavigator from './navigation/AppNavigator';
-import { firebase } from './services/Firebase/firebaseConfig';
-import { getAuthState, clearAuthState, setAuthState } from './services/Firebase/authUtils';
-import { fetchUser } from './services/Firebase/firestoreService';
-import { initializeLocationTracking, startLocationTracking, stopLocationTracking } from './services/LocationService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserProvider, useUser } from './context/UserContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
@@ -46,124 +43,83 @@ LogBox.ignoreLogs([
   'No attendance marked for today'
 ]);
 
-// Basic fallback to detect physical device (not 100% accurate but works)
-const isPhysicalDevice = Platform.OS !== 'web' && !__DEV__;
-
-// Add debounce constant at the top
-const LOCATION_CHECK_DEBOUNCE = 5000; // 5 seconds
-
 function AppContent() {
   const { user, setUser } = useUser();
   const [isReady, setIsReady] = useState(false);
-  const [isLocationInitialized, setIsLocationInitialized] = useState(false);
-  const [lastLocationCheck, setLastLocationCheck] = useState(0);
+  const [authError, setAuthError] = useState(null);
+  const [shouldNavigateToLogin, setShouldNavigateToLogin] = useState(false);
 
-  // Initialize location tracking
-  useEffect(() => {
-    const setupLocationTracking = async () => {
-      try {
-        // Debounce location checks
-        const now = Date.now();
-        if (now - lastLocationCheck < LOCATION_CHECK_DEBOUNCE) {
-          return;
-        }
-        setLastLocationCheck(now);
+  const initializeAuth = async () => {
+    try {
+      console.log('[DEBUG] Starting auth initialization');
+      setIsReady(false);
 
-        // Only initialize if not already initialized and user is logged in
-        if (!isLocationInitialized && user && user.email) {
-          await initializeLocationTracking();
-          
-          // Normalize role for comparison
-          const normalizedRole = user.role?.toLowerCase()?.trim();
-          
-          // Only start tracking for staff, faculty, and admin users
-          if (['staff', 'faculty', 'admin'].includes(normalizedRole)) {
-            await startLocationTracking(true); // Force start tracking
-            console.log('✅ Location tracking initialized for authorized role:', {
-              email: user.email,
-              role: normalizedRole
-            });
-          } else if (normalizedRole) { // Only log if role exists
-            console.log('ℹ️ Location tracking not needed for role:', normalizedRole);
-            // Ensure tracking is stopped for unauthorized roles
-            await stopLocationTracking();
-          }
-          setIsLocationInitialized(true);
-        }
-      } catch (error) {
-        console.error('Location tracking setup error:', error);
-        setIsLocationInitialized(false);
-      }
-    };
+      // Get stored user data
+      const storedUserData = await AsyncStorage.getItem('@user_data');
+      const isLoggedIn = await AsyncStorage.getItem('@is_logged_in');
 
-    setupLocationTracking();
-
-    // Cleanup when user logs out or role changes
-    return () => {
-      const cleanup = async () => {
-        const normalizedRole = user?.role?.toLowerCase()?.trim();
-        if (!user || !['staff', 'faculty', 'admin'].includes(normalizedRole)) {
-          await stopLocationTracking();
-          setIsLocationInitialized(false);
-        }
-      };
-      cleanup();
-    };
-  }, [user, user?.role, isLocationInitialized]);
-
-  // Handle auth state changes
-  useEffect(() => {
-    let isMounted = true;
-    const unsubscribe = firebase.auth().onAuthStateChanged(async (firebaseUser) => {
-      if (!isMounted) return;
-
-      if (firebaseUser) {
-        try {
-          const userData = await fetchUser(firebaseUser.email);
-          if (userData && isMounted) {
-            const completeUser = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email,
-              emailVerified: firebaseUser.emailVerified,
-              ...userData,
-              role: userData.role?.toLowerCase()
-            };
-            // Only update if user data has changed
-            if (JSON.stringify(completeUser) !== JSON.stringify(user)) {
-              setUser(completeUser);
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching user data:', error);
-          if (isMounted) {
-            setUser(null);
-          }
-        }
+      if (storedUserData && isLoggedIn === 'true') {
+        console.log('[DEBUG] Found stored user data');
+        const userData = JSON.parse(storedUserData);
+        setUser(userData);
+        setIsReady(true);
+        setShouldNavigateToLogin(false);
       } else {
-        if (isMounted) {
-          setUser(null);
-        }
+        console.log('[DEBUG] No stored user data found');
+        setUser(null);
+        setIsReady(true);
+        setShouldNavigateToLogin(true);
       }
+    } catch (error) {
+      console.error('[DEBUG] Auth initialization error:', error);
+      setAuthError('Failed to initialize authentication. Please restart the app.');
       setIsReady(true);
-    });
+    }
+  };
 
-    return () => {
-      isMounted = false;
-      unsubscribe();
-    };
+  // Handle auth state changes and restore session
+  useEffect(() => {
+    initializeAuth();
   }, []);
 
   // Compute navigation state only when user changes
-  const navigationState = useMemo(() => ({
-    isLoggedIn: !!user?.email,
-    isReady: true,
-    userRole: user?.role?.toLowerCase()
-  }), [user?.email, user?.role]);
+  const navigationState = useMemo(() => {
+    return {
+      isLoggedIn: !!user?.email,
+      isReady: isReady,
+      userRole: user?.role?.toLowerCase(),
+      shouldNavigateToLogin: !user?.email || shouldNavigateToLogin
+    };
+  }, [user?.email, user?.role, shouldNavigateToLogin, isReady]);
 
   if (!isReady) {
     return (
       <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={{ marginTop: 10, color: theme.colors.primary }}>Loading...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (authError) {
+    return (
+      <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Text style={{ color: theme.colors.error, fontSize: 18, textAlign: 'center' }}>{authError}</Text>
+        <TouchableOpacity 
+          style={{ 
+            marginTop: 20, 
+            padding: 10, 
+            backgroundColor: theme.colors.primary,
+            borderRadius: 5
+          }}
+          onPress={async () => {
+            setAuthError(null);
+            setIsReady(false);
+            await initializeAuth();
+          }}
+        >
+          <Text style={{ color: 'white' }}>Try Again</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }

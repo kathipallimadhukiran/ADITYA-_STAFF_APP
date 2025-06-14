@@ -93,6 +93,16 @@ const commonScreens = [
       title: 'User Access Management',
       headerBackTitleVisible: false
     }
+  },
+  {
+    name: "StaffAttendanceTracker",
+    component: StaffAttendanceTracker,
+    options: { headerShown: true, title: 'Staff Attendance Tracker' }
+  },
+  {
+    name: "StaffLocationTracker",
+    component: StaffLocationTracker,
+    options: { headerShown: true, title: 'Staff Location Tracker' }
   }
 ];
 
@@ -154,16 +164,6 @@ const roleSpecificScreens = {
       name: "FacultyDashboard",
       component: DashboardScreen,
       options: { headerShown: false }
-    },
-    {
-      name: "StaffAttendanceTracker",
-      component: StaffAttendanceTracker,
-      options: { headerShown: true }
-    },
-    {
-      name: "StaffLocationTracker",
-      component: StaffLocationTracker,
-      options: { headerShown: true }
     }
   ],
   staff: [
@@ -171,16 +171,6 @@ const roleSpecificScreens = {
       name: "StaffDashboard",
       component: DashboardScreen,
       options: { headerShown: false }
-    },
-    {
-      name: "StaffAttendanceTracker",
-      component: StaffAttendanceTracker,
-      options: { headerShown: true }
-    },
-    {
-      name: "StaffLocationTracker",
-      component: StaffLocationTracker,
-      options: { headerShown: true }
     }
   ],
   admin: [
@@ -188,16 +178,6 @@ const roleSpecificScreens = {
       name: "AdminDashboard",
       component: DashboardScreen,
       options: { headerShown: false }
-    },
-    {
-      name: "StaffAttendanceTracker",
-      component: StaffAttendanceTracker,
-      options: { headerShown: true }
-    },
-    {
-      name: "StaffLocationTracker",
-      component: StaffLocationTracker,
-      options: { headerShown: true }
     }
   ]
 };
@@ -235,16 +215,19 @@ const debugNavigation = (screens, initialRoute, userRole) => {
   return true;
 };
 
-export default function AppNavigator({ isLoggedIn, userRole }) {
+export default function AppNavigator({ isLoggedIn, userRole, shouldNavigateToLogin }) {
   const { screens, initialRoute } = useMemo(() => {
     const getScreens = () => {
       // Always include auth screens and role-specific screens
       const baseScreens = [...authScreens, faceCaptureScreen];
       
-      if (!isLoggedIn) {
+      if (!isLoggedIn || shouldNavigateToLogin) {
         return baseScreens;
       }
 
+      // Get role-specific screens
+      const roleScreens = roleSpecificScreens[userRole?.toLowerCase()] || [];
+      
       // Include screens for all roles to allow navigation between roles if needed
       const allRoleScreens = Object.values(roleSpecificScreens).flat();
       
@@ -256,7 +239,7 @@ export default function AppNavigator({ isLoggedIn, userRole }) {
     };
 
     const getInitialRoute = () => {
-      if (!isLoggedIn) return 'Login';
+      if (!isLoggedIn || shouldNavigateToLogin) return 'Login';
       const validRole = validateRole(userRole);
       return `${validRole.charAt(0).toUpperCase() + validRole.slice(1)}Dashboard`;
     };
@@ -265,13 +248,16 @@ export default function AppNavigator({ isLoggedIn, userRole }) {
       screens: getScreens(),
       initialRoute: getInitialRoute()
     };
-  }, [isLoggedIn, userRole]);
+  }, [isLoggedIn, userRole, shouldNavigateToLogin]);
 
   // Validate navigation setup
   if (!debugNavigation(screens, initialRoute, userRole)) {
-    const fallbackRoute = isLoggedIn ? 'Profile' : 'Login';
+    const fallbackRoute = isLoggedIn && !shouldNavigateToLogin ? 'Profile' : 'Login';
     console.warn(`[NAVIGATION WARNING] Falling back to ${fallbackRoute} due to invalid initial route for role: ${userRole}`);
   }
+
+  // Debug log available screens
+  console.log('[DEBUG] Available screens:', screens.map(s => s.name));
 
   return (
     <Stack.Navigator 
@@ -284,7 +270,8 @@ export default function AppNavigator({ isLoggedIn, userRole }) {
         freezeOnBlur: true
       }}
     >
-      {screens.map(screen => (
+      {/* Auth Screens */}
+      {authScreens.map(screen => (
         <Stack.Screen
           key={screen.name}
           name={screen.name}
@@ -296,6 +283,46 @@ export default function AppNavigator({ isLoggedIn, userRole }) {
           initialParams={screen.initialParams}
         />
       ))}
+
+      {/* Role-specific Screens */}
+      {Object.entries(roleSpecificScreens).map(([role, roleScreens]) => (
+        roleScreens.map(screen => (
+          <Stack.Screen
+            key={screen.name}
+            name={screen.name}
+            component={screen.component}
+            options={{
+              ...screen.options,
+              animationEnabled: false
+            }}
+          />
+        ))
+      ))}
+
+      {/* Common Screens */}
+      {commonScreens.map(screen => (
+        <Stack.Screen
+          key={screen.name}
+          name={screen.name}
+          component={screen.component}
+          options={{
+            ...screen.options,
+            animationEnabled: false
+          }}
+        />
+      ))}
+
+      {/* Face Capture Screen */}
+      <Stack.Screen
+        name={faceCaptureScreen.name}
+        component={faceCaptureScreen.component}
+        options={{
+          ...faceCaptureScreen.options,
+          animationEnabled: false
+        }}
+      />
+
+      {/* Edit Schedule Page */}
       <Stack.Screen 
         name="EditSchedulePage" 
         component={EditSchedulePage}

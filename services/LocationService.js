@@ -1,30 +1,35 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
-import { Platform, AppState, NativeEventEmitter, NativeModules } from 'react-native';
+import * as BackgroundTask from 'expo-background-task';
+import { Platform, AppState, NativeEventEmitter, NativeModules, Alert, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import { firebase as firebaseInstance, getAuth, db } from './Firebase/firebaseConfig';
 import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 
 // Constants
 const LOCATION_TASK_NAME = 'background-location-task';
 const RECOVERY_TASK_NAME = 'location-recovery-task';
 const BACKGROUND_FETCH_TASK = 'background-fetch-task';
-const LOCATION_UPDATE_INTERVAL = 120000; // 1 minute
-const RECOVERY_INTERVAL = 120000; // 1 minute
-const LOCATION_DISTANCE_INTERVAL = 5; // Update every 5 meters
-const BACKGROUND_UPDATE_INTERVAL = 120000; // 1 minute
-const BACKGROUND_DISTANCE_INTERVAL = 5; // Update every 5 meters
+const LOCATION_UPDATE_INTERVAL = 15 * 1000; // 15 seconds
+const RECOVERY_INTERVAL = 15 * 1000; // 15 seconds
+const LOCATION_DISTANCE_INTERVAL = 0; // Remove distance interval to ensure time-based updates
+const BACKGROUND_UPDATE_INTERVAL = 15000; // 15 seconds
+const BACKGROUND_DISTANCE_INTERVAL = 0; // Remove distance interval
 const TRACKING_ENABLED_KEY = '@location_tracking_enabled';
 const LAST_USER_KEY = '@last_user_email';
 const USER_AUTH_KEY = '@user_auth_data';
 const OFFLINE_LOCATIONS_KEY = '@offline_locations';
-const STATE_CHANGE_DEBOUNCE = 10000; // 1 second debounce for state changes
-const SETTINGS_REFRESH_INTERVAL = 5* 60* 1000; // 30 minutes in milliseconds
+const STATE_CHANGE_DEBOUNCE = 15000; // 15 second debounce for state changes
+const SETTINGS_REFRESH_INTERVAL =   1000; // 30 minutes in milliseconds
 const SETTINGS_CACHE_KEY = '@attendance_settings_cache';
+const USER_DATA_CACHE_KEY = '@user_data_cache';
+const USER_DATA_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 // Track active state
 let isTrackingActive = false;
@@ -81,14 +86,53 @@ const cacheAuthData = async () => {
 
 const getCachedAuthData = async () => {
   try {
-    if (cachedAuthData) return cachedAuthData;
-    const data = await AsyncStorage.getItem(USER_AUTH_KEY);
-    if (data) {
-      cachedAuthData = JSON.parse(data);
+    // First check if we have valid cached data
+    if (cachedAuthData) {
+      console.log('[DEBUG] Using in-memory cached auth data');
       return cachedAuthData;
     }
-  } catch (error) {}
-  return null;
+
+    // If no in-memory cache, try to get from AsyncStorage
+    const data = await AsyncStorage.getItem(USER_AUTH_KEY);
+    if (data) {
+      try {
+        const parsedData = JSON.parse(data);
+        // Validate the cached data
+        if (parsedData && parsedData.email && parsedData.role) {
+          console.log('[DEBUG] Using AsyncStorage cached auth data');
+          cachedAuthData = parsedData;
+          return parsedData;
+        }
+      } catch (e) {
+        console.log('[DEBUG] Error parsing cached auth data:', e);
+      }
+    }
+
+    // If no valid cached data, try to get fresh data
+    const user = firebase.auth().currentUser;
+    if (user) {
+      console.log('[DEBUG] Fetching fresh auth data for user:', user.email);
+      const userDoc = await db.collection('users').doc(user.email).get();
+      if (userDoc.exists) {
+        const userData = userDoc.data();
+        const authData = {
+          email: user.email,
+          role: userData?.role,
+          timestamp: new Date().toISOString()
+        };
+        // Update both in-memory and AsyncStorage cache
+        cachedAuthData = authData;
+        await AsyncStorage.setItem(USER_AUTH_KEY, JSON.stringify(authData));
+        return authData;
+      }
+    }
+
+    console.log('[DEBUG] No valid auth data available');
+    return null;
+  } catch (error) {
+    console.error('[DEBUG] Error in getCachedAuthData:', error);
+    return null;
+  }
 };
 
 TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
@@ -146,7 +190,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
     try {
       // Check working hours first
       const workingHoursCheck = await checkWorkingHours();
-      if (!workingHoursCheck || !workingHoursCheck.isWithinWorkingHours) {
+      if (!workingHoursCheck.isWithinWorkingHours) {
         console.log('[DEBUG] Outside working hours, stopping tracking');
         await stopLocationTracking();
         return;
@@ -163,6 +207,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       // Save location if all checks pass
       await saveLocationToFirebase(location);
       lastLocationUpdate = new Date();
+      console.log('[DEBUG] Location updated:', new Date().toISOString());
     } catch (error) {
       console.error('[DEBUG] Error in background task:', error);
       await stopLocationTracking();
@@ -236,7 +281,7 @@ const startSettingsRefresh = () => {
       if (isTracking) {
         console.log('[DEBUG] Rechecking working hours with updated settings');
         const workingHoursCheck = await checkWorkingHours();
-        if (!workingHoursCheck || !workingHoursCheck.isWithinWorkingHours) {
+        if (!workingHoursCheck.isWithinWorkingHours) {
           console.log('[DEBUG] Outside working hours with new settings, stopping tracking');
           await stopLocationTracking();
         }
@@ -252,9 +297,43 @@ const stopSettingsRefresh = () => {
   }
 };
 
-const checkWorkingHours = async () => {
+const getUserData = async () => {
   try {
-    // Get current time and day
+    // Try to get cached data first
+    const cachedData = await AsyncStorage.getItem(USER_DATA_CACHE_KEY);
+    if (cachedData) {
+      const { data, timestamp } = JSON.parse(cachedData);
+      if (Date.now() - timestamp < USER_DATA_CACHE_DURATION) {
+        console.log('[DEBUG] Using cached user data:', data);
+        return data;
+      }
+    }
+
+    // If no cache or expired, fetch from Firestore
+    const auth = getAuth();
+    const user = auth.currentUser;
+    
+    if (!user) {
+      console.log('[DEBUG] No user logged in');
+      return null;
+    }
+
+    console.log('[DEBUG] Fetching data for user:', user.uid);
+    const db = getFirestore();
+    
+    // Get settings from settings collection
+    const settingsDocRef = doc(db, 'settings', 'attendance');
+    const settingsDoc = await getDoc(settingsDocRef);
+    
+    if (!settingsDoc.exists()) {
+      console.log('[DEBUG] No settings document found');
+      return null;
+    }
+
+    const settingsData = settingsDoc.data();
+    console.log('[DEBUG] Retrieved settings:', settingsData);
+
+    // Get current day
     const now = new Date();
     const currentDay = now.toLocaleString('default', { weekday: 'long' });
     const currentHour = now.getHours();
@@ -263,176 +342,214 @@ const checkWorkingHours = async () => {
 
     console.log('[DEBUG] Checking working hours:', {
       currentTime: `${currentHour}:${currentMinute}`,
-      day: currentDay,
-      date: todayStr
+      date: todayStr,
+      day: currentDay
     });
 
-    // Try to get cached settings first
-    let settings = await getCachedSettings();
-    if (!settings) {
-      settings = await fetchSettings();
-    }
-
-    if (!settings) {
-      console.log('[DEBUG] Could not get settings');
-      return false;
-    }
-
-    console.log('[DEBUG] Using settings:', settings);
-
     // Check if it's a working day
-    const daySettings = settings.workingDays?.[currentDay];
+    const daySettings = settingsData.workingDays?.[currentDay];
     if (!daySettings || !daySettings.isWorking) {
       console.log(`[DEBUG] ${currentDay} is not a working day`);
-      return false;
+      return null;
     }
 
     // Check if it's a holiday
-    const isHoliday = settings.holidays?.some(holiday => holiday.date === todayStr);
+    const isHoliday = settingsData.holidays?.some(holiday => holiday.date === todayStr);
     if (isHoliday) {
       console.log('[DEBUG] Today is a holiday');
-      return false;
+      return null;
     }
 
-    // Parse start and end times
-    const [startHour, startMinute] = (daySettings.startTime || "00:00").split(':').map(Number);
-    const [endHour, endMinute] = (daySettings.endTime || "23:59").split(':').map(Number);
+    const workingHours = {
+      startTime: daySettings.startTime,
+      endTime: daySettings.endTime
+    };
 
-    const currentTimeInMinutes = (currentHour * 60) + currentMinute;
-    const startTimeInMinutes = (startHour * 60) + startMinute;
-    const endTimeInMinutes = (endHour * 60) + endMinute;
+    // Cache the data
+    await AsyncStorage.setItem(USER_DATA_CACHE_KEY, JSON.stringify({
+      data: { workingHours },
+      timestamp: Date.now()
+    }));
+
+    return { workingHours };
+  } catch (error) {
+    console.error('[DEBUG] Error getting user data:', error);
+    return null;
+  }
+};
+
+const checkWorkingHours = async () => {
+  try {
+    const userData = await getUserData();
+    console.log('[DEBUG] User data in checkWorkingHours:', userData);
+
+    if (!userData || !userData.workingHours) {
+      console.log('[DEBUG] No working hours data available');
+      return { isWithinWorkingHours: false };
+    }
+
+    const { startTime, endTime } = userData.workingHours;
+    const currentTime = new Date();
+    const currentHour = currentTime.getHours();
+    const currentMinute = currentTime.getMinutes();
+    const currentTimeString = `${currentHour}:${currentMinute}`;
+
+    // Convert times to minutes for easier comparison
+    const [startHour, startMinute] = startTime.split(':').map(Number);
+    const [endHour, endMinute] = endTime.split(':').map(Number);
+    
+    const currentMinutes = currentHour * 60 + currentMinute;
+    const startMinutes = startHour * 60 + startMinute;
+    const endMinutes = endHour * 60 + endMinute;
 
     console.log('[DEBUG] Time comparison:', {
-      current: `${currentHour}:${currentMinute}`,
-      start: daySettings.startTime,
-      end: daySettings.endTime,
-      currentMinutes: currentTimeInMinutes,
-      startMinutes: startTimeInMinutes,
-      endMinutes: endTimeInMinutes
+      current: currentTimeString,
+      currentMinutes,
+      start: startTime,
+      startMinutes,
+      end: endTime,
+      endMinutes
     });
 
-    const isWithinWorkingHours = currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes < endTimeInMinutes;
-
+    const isWithinWorkingHours = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    
     console.log('[DEBUG] Working hours check result:', {
-      isWithinWorkingHours,
-      startTime: daySettings.startTime,
-      endTime: daySettings.endTime,
-      currentTime: `${currentHour}:${currentMinute}`
+      currentTime: currentTimeString,
+      startTime,
+      endTime,
+      isWithinWorkingHours
     });
 
-    return {
-      isWithinWorkingHours,
-      daySettings,
-      settings,
-      timeInfo: {
-        currentTimeInMinutes,
-        startTimeInMinutes,
-        endTimeInMinutes
-      }
-    };
+    return { isWithinWorkingHours };
   } catch (error) {
     console.error('[DEBUG] Error checking working hours:', error);
-    console.error('[DEBUG] Error stack:', error.stack);
+    return { isWithinWorkingHours: false };
+  }
+};
+
+const isLocationServicesEnabled = async () => {
+  try {
+    const enabled = await Location.hasServicesEnabledAsync();
+    return enabled;
+  } catch (error) {
+    console.error('[DEBUG] Error checking location services:', error);
     return false;
   }
 };
 
 const startLocationTracking = async () => {
   try {
-    // Check authorization first
-    const authorized = await isUserAuthorized();
-    if (!authorized) {
-      console.log('[DEBUG] User not authorized to start location tracking');
-      return false;
+    console.log('[DEBUG] Starting location tracking...');
+    
+    // Check if tracking is already active
+    const isTrackingActive = await AsyncStorage.getItem('isTrackingActive');
+    if (isTrackingActive === 'true') {
+      console.log('[DEBUG] Location tracking is already active');
+      return;
     }
 
-    // Get current user data
+    // Get user data first
     const userData = await getCachedAuthData();
-    if (!userData || !['staff', 'faculty', 'admin'].includes(userData.role)) {
-      console.log('[DEBUG] Invalid user role for location tracking:', userData?.role);
-      return false;
+    if (!userData) {
+      console.log('[DEBUG] No user data available, cannot start tracking');
+      return;
     }
 
-    // Check working hours
+    // Check if user is logged in
+    const auth = getAuth();
+    const user = auth.currentUser;
+    if (!user) {
+      console.log('[DEBUG] No user logged in, cannot start tracking');
+      Alert.alert('Error', 'Please log in to start location tracking');
+      return;
+    }
+
+    // Check if within working hours
     const workingHoursCheck = await checkWorkingHours();
-    if (!workingHoursCheck || !workingHoursCheck.isWithinWorkingHours) {
-      console.log('[DEBUG] Outside working hours, cannot start tracking');
-      await stopLocationTracking();
-      return false;
+    if (!workingHoursCheck.isWithinWorkingHours) {
+      console.log('[DEBUG] Outside working hours, not starting location tracking');
+      Alert.alert('Notice', 'Location tracking is only available during your working hours');
+      return;
     }
 
-    const { daySettings } = workingHoursCheck;
+    // Request permissions
+    const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
+    if (foregroundStatus !== 'granted') {
+      console.log('Foreground location permission denied');
+      Alert.alert(
+        'Location Permission Required',
+        'Please enable location access in settings to track attendance.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() }
+        ]
+      );
+      return;
+    }
 
-    // Calculate time values for wake lock
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const [endHour, endMinute] = daySettings.endTime.split(':').map(Number);
-    
-    const currentTimeMinutes = (currentHour * 60) + currentMinute;
-    const endTimeMinutes = (endHour * 60) + endMinute;
-    
-    const remainingMinutes = endTimeMinutes - currentTimeMinutes;
-    const wakeLockTimeout = Math.max(remainingMinutes * 60 * 1000, 60000); // At least 1 minute
+    const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
+    if (backgroundStatus !== 'granted') {
+      console.log('Background location permission denied');
+      Alert.alert(
+        'Background Location Required',
+        'Please enable background location access in settings to track attendance when app is closed.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() }
+        ]
+      );
+      return;
+    }
 
-    // Start location updates with settings from Firebase
-    const locationConfig = {
-      accuracy: Location.Accuracy.Balanced,
+    // Set tracking as active before starting location updates
+    await AsyncStorage.setItem('isTrackingActive', 'true');
+
+    // Start location updates with foreground service
+    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+      accuracy: Location.Accuracy.BestForNavigation,
       timeInterval: LOCATION_UPDATE_INTERVAL,
-      distanceInterval: LOCATION_DISTANCE_INTERVAL,
-      showsBackgroundLocationIndicator: true,
-      activityType: Location.ActivityType.OtherNavigation,
+      distanceInterval: 0,
       foregroundService: {
-        notificationTitle: "Location Active",
-        notificationBody: `Tracking until ${daySettings.endTime}`,
-        notificationColor: "#FF231F7C",
-        killServiceOnDestroy: true
+        notificationTitle: 'Location Tracking Active',
+        notificationBody: 'Tracking your location for attendance',
+        notificationColor: '#4CAF50',
       },
-      android: {
-        startForeground: true,
+      // Android specific settings
+      ...(Platform.OS === 'android' && {
         foregroundService: {
-          notificationTitle: "Location Active",
-          notificationBody: `Tracking until ${daySettings.endTime}`,
-          notificationColor: "#FF231F7C",
-          killServiceOnDestroy: true
+          notificationTitle: 'Location Tracking Active',
+          notificationBody: 'Tracking your location for attendance',
+          notificationColor: '#4CAF50',
+          killServiceOnDestroy: false,
+          startOnBoot: true,
+          restartOnKill: true,
+          notification: {
+            sticky: true,
+            ongoing: true,
+            autoCancel: false,
+            importance: 'high',
+            priority: 'max',
+            channelId: 'location-tracking',
+            showWhen: true,
+            visibility: 'public',
+            color: '#4CAF50',
+            icon: 'ic_notification',
+            actions: [],
+          },
         },
-        allowBackgroundLocationUpdates: true,
-        backgroundUpdates: true,
-        accuracyAndroid: Location.Accuracy.BALANCED,
-        isStarted: true,
-        enableHighAccuracy: false,
-        forceRequestLocation: true,
-        wakeLockTimeout: wakeLockTimeout,
-        notification: {
-          sticky: true,
-          channelId: 'location',
-          priority: 'high',
-          visibility: 'public',
-          importance: 'high',
-          ongoing: true,
-          icon: 'ic_launcher',
-          color: true
-        }
-      }
-    };
-
-    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, locationConfig);
-    await saveTrackingState(true);
-    isTrackingActive = true;
-    lastLocationUpdate = new Date();
-
-    console.log('[DEBUG] Location tracking started with settings:', {
-      startTime: daySettings.startTime,
-      endTime: daySettings.endTime,
-      role: userData.role,
-      wakeLockTimeout: Math.round(wakeLockTimeout / 60000) + ' minutes'
+      }),
     });
 
-    return true;
+    console.log('[DEBUG] Location tracking started successfully');
+
+    // Start recovery check
+    startRecoveryCheck();
+
   } catch (error) {
     console.error('[DEBUG] Error starting location tracking:', error);
-    await stopLocationTracking();
-    return false;
+    // Reset tracking state if there was an error
+    await AsyncStorage.setItem('isTrackingActive', 'false');
+    Alert.alert('Error', 'Failed to start location tracking. Please try again.');
   }
 };
 
@@ -469,39 +586,43 @@ const startForcedUpdates = () => {
 
 const handleAppStateChange = async (nextAppState) => {
   try {
-    if (nextAppState === 'background') {
-      await cacheAuthData();
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.BestForNavigation,
-        maximumAge: 0,
-        timeout: 5000
-      });
-      
-      if (location) {
-        await saveLocationToFirebase(location);
-      }
-
-      const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
-        .catch(() => false);
-      
-      if (!isTracking) {
-        await startLocationTracking();
-      }
-
-      if (!forcedUpdateInterval) {
-        startForcedUpdates();
-      }
+    const now = Date.now();
+    if (now - lastStateChangeTime < STATE_CHANGE_DEBOUNCE) {
+      return;
     }
-  } catch (error) {}
+    lastStateChangeTime = now;
+
+    if (nextAppState === 'active' && lastAppState.match(/inactive|background/)) {
+      console.log('[DEBUG] App came to foreground');
+      await checkAndRestartTracking();
+    } else if (nextAppState.match(/inactive|background/) && lastAppState === 'active') {
+      console.log('[DEBUG] App went to background');
+      await checkAndRestartTracking();
+    }
+
+    lastAppState = nextAppState;
+  } catch (error) {
+    console.error('[DEBUG] Error in app state change:', error);
+  }
 };
 
 const registerBackgroundTasks = async () => {
   try {
     if (!backgroundTaskRegistered) {
-      await BackgroundFetch.registerTaskAsync(RECOVERY_TASK_NAME, {
-        minimumInterval: RECOVERY_INTERVAL,
-        stopOnTerminate: false,
-        startOnBoot: true
+      await TaskManager.defineTask(RECOVERY_TASK_NAME, async () => {
+        try {
+          const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
+            .catch(() => false);
+
+          if (!isTracking) {
+            console.log('[DEBUG] Recovery task detected tracking stopped, restarting...');
+            await startLocationTracking();
+          }
+          return BackgroundFetch.Result.NewData;
+        } catch (error) {
+          console.error('[DEBUG] Error in recovery task:', error);
+          return BackgroundFetch.Result.Failed;
+        }
       });
       backgroundTaskRegistered = true;
     }
@@ -510,25 +631,19 @@ const registerBackgroundTasks = async () => {
 
 const stopLocationTracking = async () => {
   try {
-    if (forcedUpdateInterval) {
-      clearInterval(forcedUpdateInterval);
-      forcedUpdateInterval = null;
+    if (!isTrackingActive) {
+      return;
     }
 
-    // Stop settings refresh
-    stopSettingsRefresh();
+    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+    await TaskManager.unregisterTaskAsync(RECOVERY_TASK_NAME);
 
-    const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
-      .catch(() => false);
-    
-    if (isTracking) {
-      await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-    }
-    
     isTrackingActive = false;
-    lastLocationUpdate = null;
     await saveTrackingState(false);
-  } catch (error) {}
+    console.log('[DEBUG] Location tracking stopped successfully');
+  } catch (error) {
+    console.error('[DEBUG] Error stopping location tracking:', error);
+  }
 };
 
 async function getDeviceInfo() {
@@ -698,39 +813,14 @@ const saveLocationToFirebase = async (location) => {
 
   while (retryCount < maxRetries) {
     try {
-      const authorized = await isUserAuthorized();
-      if (!authorized) {
-        console.log('User not authorized to save location');
-        return false;
-      }
-
-      let userData = null;
-      const currentUser = firebase.auth().currentUser;
-      
-      if (!currentUser) {
-        const cachedData = await getCachedAuthData();
-        if (!cachedData) {
-          console.log('No user data available for location save');
-          return false;
-        }
-        userData = { email: cachedData.email, role: cachedData.role };
-      } else {
-        const userDoc = await db.collection('users').doc(currentUser.email).get();
-        userData = { 
-          email: currentUser.email, 
-          role: userDoc.data()?.role 
-        };
-      }
-
-      if (!['staff', 'faculty', 'admin'].includes(userData.role)) {
-        console.log('User role not authorized for location tracking:', userData.role);
+      // Get user data from cache first (faster and works in background)
+      const cachedData = await getCachedAuthData();
+      if (!cachedData) {
+        console.log('[DEBUG] No cached user data available');
         return false;
       }
 
       const timestamp = new Date();
-      const deviceInfo = await getDeviceInfo();
-      const batteryStatus = await getBatteryStatus();
-      
       const locationData = {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
@@ -739,34 +829,30 @@ const saveLocationToFirebase = async (location) => {
         speed: location.coords.speed || 0,
         heading: location.coords.heading || 0,
         timestamp: timestamp,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        appState: AppState.currentState,
         lastUpdate: timestamp.toISOString(),
-        deviceInfo: deviceInfo,
-        userId: userData.email,
-        userRole: userData.role,
+        userId: cachedData.email,
+        userRole: cachedData.role,
         isBackground: AppState.currentState === 'background'
       };
 
-      if (batteryStatus) {
-        locationData.battery = batteryStatus;
-      }
-
-      await db.collection('locations').doc(userData.email).set({
+      // Use set with merge to ensure we don't lose data
+      await db.collection('locations').doc(cachedData.email).set({
         currentLocation: locationData,
         lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      }, { merge: true });
       
-      console.log('Location saved successfully:', { 
-        email: userData.email,
-        timestamp: timestamp.toISOString()
+      console.log('[DEBUG] Location saved successfully:', { 
+        email: cachedData.email,
+        timestamp: timestamp.toISOString(),
+        isBackground: locationData.isBackground
       });
       
       return true;
     } catch (error) {
-      console.error(`Location save attempt ${retryCount + 1} failed:`, error);
+      console.error(`[DEBUG] Location save attempt ${retryCount + 1} failed:`, error);
       retryCount++;
       if (retryCount === maxRetries) {
+        // Save to offline storage if all retries fail
         await saveLocationOffline({
           ...location,
           timestamp: new Date(),
@@ -774,7 +860,8 @@ const saveLocationToFirebase = async (location) => {
         });
         return false;
       }
-      await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+      // Exponential backoff for retries
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
     }
   }
   return false;
@@ -782,13 +869,46 @@ const saveLocationToFirebase = async (location) => {
 
 const saveLocationOffline = async (location) => {
   try {
+    const cachedData = await getCachedAuthData();
+    if (!cachedData) return;
+
     const offlineData = {
       ...location,
+      userId: cachedData.email,
+      userRole: cachedData.role,
       timestamp: new Date().toISOString(),
       savedAt: new Date().toISOString()
     };
-    await AsyncStorage.setItem(OFFLINE_LOCATIONS_KEY, JSON.stringify(offlineData));
-  } catch (error) {}
+
+    // Get existing offline data
+    const existingData = await AsyncStorage.getItem(OFFLINE_LOCATIONS_KEY);
+    let offlineLocations = [];
+    
+    if (existingData) {
+      try {
+        offlineLocations = JSON.parse(existingData);
+        if (!Array.isArray(offlineLocations)) {
+          offlineLocations = [];
+        }
+      } catch (e) {
+        offlineLocations = [];
+      }
+    }
+
+    // Add new location and keep only last 100 locations
+    offlineLocations.push(offlineData);
+    if (offlineLocations.length > 100) {
+      offlineLocations = offlineLocations.slice(-100);
+    }
+
+    await AsyncStorage.setItem(OFFLINE_LOCATIONS_KEY, JSON.stringify(offlineLocations));
+    console.log('[DEBUG] Location saved offline:', { 
+      email: cachedData.email,
+      timestamp: offlineData.timestamp
+    });
+  } catch (error) {
+    console.error('[DEBUG] Error saving location offline:', error);
+  }
 };
 
 const syncOfflineLocations = async () => {
@@ -796,12 +916,25 @@ const syncOfflineLocations = async () => {
     const offlineData = await AsyncStorage.getItem(OFFLINE_LOCATIONS_KEY);
     if (!offlineData) return;
 
-    const locationData = JSON.parse(offlineData);
-    try {
-      await saveLocationToFirebase(locationData);
-      await AsyncStorage.removeItem(OFFLINE_LOCATIONS_KEY);
-    } catch (error) {}
-  } catch (error) {}
+    const offlineLocations = JSON.parse(offlineData);
+    if (!Array.isArray(offlineLocations)) return;
+
+    console.log('[DEBUG] Syncing offline locations:', offlineLocations.length);
+
+    for (const location of offlineLocations) {
+      try {
+        await saveLocationToFirebase(location);
+        // Remove synced location
+        offlineLocations.shift();
+        await AsyncStorage.setItem(OFFLINE_LOCATIONS_KEY, JSON.stringify(offlineLocations));
+      } catch (error) {
+        console.error('[DEBUG] Error syncing location:', error);
+        break; // Stop on first error to prevent data loss
+      }
+    }
+  } catch (error) {
+    console.error('[DEBUG] Error in syncOfflineLocations:', error);
+  }
 };
 
 const initializeLocationTracking = async () => {
@@ -828,16 +961,20 @@ const initializeLocationTracking = async () => {
       return false;
     }
 
-    await BackgroundFetch.registerTaskAsync(BACKGROUND_FETCH_TASK, {
-      minimumInterval: RECOVERY_INTERVAL,
-      stopOnTerminate: false,
-      startOnBoot: true
-    });
+    await TaskManager.defineTask(RECOVERY_TASK_NAME, async () => {
+      try {
+        const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
+          .catch(() => false);
 
-    await BackgroundFetch.registerTaskAsync(RECOVERY_TASK_NAME, {
-      minimumInterval: RECOVERY_INTERVAL,
-      stopOnTerminate: false,
-      startOnBoot: true
+        if (!isTracking) {
+          console.log('[DEBUG] Recovery task detected tracking stopped, restarting...');
+          await startLocationTracking();
+        }
+        return BackgroundFetch.Result.NewData;
+      } catch (error) {
+        console.error('[DEBUG] Error in recovery task:', error);
+        return BackgroundFetch.Result.Failed;
+      }
     });
 
     const wasEnabled = await isLocationTrackingEnabled();
@@ -854,10 +991,59 @@ const initializeLocationTracking = async () => {
   }
 };
 
+// Add a new function to check and restart tracking if needed
+const checkAndRestartTracking = async () => {
+  try {
+    const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
+      .catch(() => false);
+
+    if (!isTracking) {
+      console.log('[DEBUG] Tracking not active, restarting...');
+      await startLocationTracking();
+    }
+  } catch (error) {
+    console.error('[DEBUG] Error checking tracking status:', error);
+  }
+};
+
+// Add a new function to ensure tracking is active
+const ensureTrackingActive = async () => {
+  try {
+    const wasEnabled = await isLocationTrackingEnabled();
+    if (wasEnabled) {
+      await startLocationTracking();
+    }
+  } catch (error) {
+    console.error('[DEBUG] Error ensuring tracking is active:', error);
+  }
+};
+
+// Add a new function to handle app termination
+const handleAppTermination = async () => {
+  try {
+    console.log('[DEBUG] App is being terminated, ensuring tracking continues...');
+    await checkAndRestartTracking();
+  } catch (error) {
+    console.error('[DEBUG] Error handling app termination:', error);
+  }
+};
+
+// Add a new function to setup termination listener
+const setupTerminationListener = () => {
+  if (Platform.OS === 'android') {
+    AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'inactive') {
+        await handleAppTermination();
+      }
+    });
+  }
+};
+
 export {
   startLocationTracking,
   stopLocationTracking,
   initializeLocationTracking,
   isLocationTrackingEnabled,
-  syncOfflineLocations
+  syncOfflineLocations,
+  setupTerminationListener
 };

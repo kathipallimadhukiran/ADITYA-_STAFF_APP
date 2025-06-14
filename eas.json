@@ -6,19 +6,25 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      }
     },
     "preview": {
+      "distribution": "internal",
       "android": {
         "buildType": "apk"
       },
-      "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://face-recognition-final.onrender.com"
       }
     },
     "production": {
-      "autoIncrement": true
+      "android": {
+        "buildType": "apk"
+      }
     },
     "apk": {
       "android": {

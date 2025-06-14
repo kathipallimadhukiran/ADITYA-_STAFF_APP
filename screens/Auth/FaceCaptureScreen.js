@@ -18,7 +18,7 @@ import { db } from '../../services/Firebase/firebaseConfig';
 const MAX_CAPTURES = 5;
 const { width } = Dimensions.get('window');
 const CIRCLE_SIZE = width * 0.7;
-const DEFAULT_API_URL = 'https://face-recognition-final.onrender.com';
+const DEFAULT_API_URL = 'http://192.168.94.111:5000';
 
 export default function FaceCaptureScreen({ navigation, route }) {
   const cameraRef = useRef(null);

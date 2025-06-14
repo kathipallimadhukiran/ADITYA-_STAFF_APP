@@ -293,6 +293,7 @@ const NoticesScreen = () => {
                 value={newNotice.title}
                 onChangeText={(text) => setNewNotice({ ...newNotice, title: text })}
                 placeholder="Enter notice title"
+                placeholderTextColor="#6C757D"
               />
 
               <Text style={styles.inputLabel}>Description*</Text>
@@ -301,6 +302,7 @@ const NoticesScreen = () => {
                 value={newNotice.description}
                 onChangeText={(text) => setNewNotice({ ...newNotice, description: text })}
                 placeholder="Enter notice description"
+                placeholderTextColor="#6C757D"
                 multiline
                 numberOfLines={4}
               />
@@ -311,6 +313,7 @@ const NoticesScreen = () => {
                 value={newNotice.department}
                 onChangeText={(text) => setNewNotice({ ...newNotice, department: text })}
                 placeholder="Enter department name"
+                placeholderTextColor="#6C757D"
               />
 
               <Text style={styles.inputLabel}>Target Audience</Text>
@@ -355,6 +358,7 @@ const NoticesScreen = () => {
                 value={newNotice.emailCopy}
                 onChangeText={(text) => setNewNotice({ ...newNotice, emailCopy: text })}
                 placeholder="Enter email addresses (comma-separated)"
+                placeholderTextColor="#6C757D"
                 keyboardType="email-address"
               />
 
@@ -514,6 +518,7 @@ const styles = StyleSheet.create({
     padding: 8,
     marginBottom: 16,
     fontSize: 14,
+    color: '#1D3557',
   },
   textArea: {
     height: 100,

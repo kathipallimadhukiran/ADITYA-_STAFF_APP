@@ -75,15 +75,21 @@ const LocationTracker = () => {
       setLastUpdate(new Date());
 
       if (currentUser) {
-        await addDoc(collection(db, 'locations'), {
-          userId: currentUser.uid,
-          userRole: 'staff',
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          status: 'active',
-          timestamp: serverTimestamp(),
-          location: 'Current Location',
-        });
+        await db.collection('locations').doc(currentUser.email).set({
+          currentLocation: {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            accuracy: location.coords.accuracy,
+            altitude: location.coords.altitude,
+            speed: location.coords.speed || 0,
+            heading: location.coords.heading || 0,
+            timestamp: new Date(),
+            lastUpdate: new Date().toISOString(),
+            userId: currentUser.email,
+            userRole: 'staff',
+            status: 'active'
+          }
+        }, { merge: true });
       }
     } catch (error) {
       console.error('Error updating location:', error);
