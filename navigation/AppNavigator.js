@@ -256,8 +256,7 @@ export default function AppNavigator({ isLoggedIn, userRole, shouldNavigateToLog
     console.warn(`[NAVIGATION WARNING] Falling back to ${fallbackRoute} due to invalid initial route for role: ${userRole}`);
   }
 
-  // Debug log available screens
-  console.log('[DEBUG] Available screens:', screens.map(s => s.name));
+  
 
   return (
     <Stack.Navigator 

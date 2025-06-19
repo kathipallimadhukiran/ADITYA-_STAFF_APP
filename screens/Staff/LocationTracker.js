@@ -7,7 +7,6 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
-  PermissionsAndroid,
 } from 'react-native';
 import { Card } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/FontAwesome5';
@@ -16,52 +15,69 @@ import { db } from '../../services/Firebase/firebaseConfig';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import * as Location from 'expo-location';
 import { startLocationTracking, stopLocationTracking } from '../../services/LocationService';
+import LocationPermissionScreen from '../../components/LocationPermissionScreen';
 
 const LocationTracker = () => {
   const [location, setLocation] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('offline');
   const [lastUpdate, setLastUpdate] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [hasPermission, setHasPermission] = useState(false);
 
   const auth = getAuth();
   const currentUser = auth.currentUser;
 
   useEffect(() => {
-    const initializeTracking = async () => {
-      try {
-        setLoading(true);
-        setErrorMsg(null);
-
-        // Request permissions
-        let { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          setErrorMsg('Permission to access location was denied');
-          setLoading(false);
-          return;
-        }
-
-        // Use the centralized location service
-        await startLocationTracking();
-        setStatus('active');
-        setLastUpdate(new Date());
-      } catch (error) {
-        console.error('Error:', error);
-        setErrorMsg(error.message || 'Error getting location');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initializeTracking();
-
-    // Cleanup
-    return () => {
-      // No need to cleanup as the LocationService handles this
-    };
+    checkLocationPermission();
   }, []);
 
+  const checkLocationPermission = async () => {
+    try {
+      const foreground = await Location.getForegroundPermissionsAsync();
+      const background = await Location.getBackgroundPermissionsAsync();
+      const services = await Location.hasServicesEnabledAsync();
+
+      if (foreground.status === 'granted' && 
+          background.status === 'granted' && 
+          services) {
+        setHasPermission(true);
+        initializeTracking();
+      } else {
+        setHasPermission(false);
+      }
+    } catch (error) {
+      console.error('Error checking permissions:', error);
+      setHasPermission(false);
+    }
+  };
+
+  const initializeTracking = async () => {
+    try {
+      setLoading(true);
+      setErrorMsg(null);
+
+      await startLocationTracking();
+      setStatus('active');
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error('Error:', error);
+      setErrorMsg(error.message || 'Error getting location');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePermissionGranted = () => {
+    setHasPermission(true);
+    initializeTracking();
+  };
+
   const updateLocation = async () => {
+    if (!hasPermission) {
+      return;
+    }
+
     try {
       setLoading(true);
       setErrorMsg(null);
@@ -117,6 +133,10 @@ const LocationTracker = () => {
         return '#6C757D';
     }
   };
+
+  if (!hasPermission) {
+    return <LocationPermissionScreen onPermissionGranted={handlePermissionGranted} />;
+  }
 
   if (loading && !location) {
     return (

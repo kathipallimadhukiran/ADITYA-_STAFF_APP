@@ -122,60 +122,37 @@ const LoginScreen = () => {
         return;
       }
 
+      // Store credentials securely for session restoration
+      await AsyncStorage.setItem('@user_email', email);
+      await AsyncStorage.setItem('@user_password', password);
+      
+      // Store user data
+      await AsyncStorage.setItem('@user_data', JSON.stringify(userData));
+      await AsyncStorage.setItem('@is_logged_in', 'true');
+
       // Update last login in Firestore
       await updateUserLastLogin(email);
 
       // Register and save push notification token
       await registerAndSavePushToken(email);
 
-      // Create complete user object
-      const completeUser = {
-        uid: userCredential.user.uid,
-        email: userCredential.user.email.toLowerCase().trim(),
-        emailVerified: userCredential.user.emailVerified,
-        ...userData,
-        role: userData.role?.toLowerCase(),
-        lastLogin: new Date().toISOString()
-      };
-
-      console.log('[DEBUG] Setting user context:', completeUser);
-
-      // Save user data to AsyncStorage
-      await AsyncStorage.setItem('@user_data', JSON.stringify(completeUser));
-      await AsyncStorage.setItem('@is_logged_in', 'true');
-
-      // First persist the session
-      await setAuthState(completeUser, password);
-
-      // Then update the context
-      setUser(completeUser);
-
-      // Navigate to appropriate dashboard based on role
-      const dashboardScreen = `${completeUser.role.charAt(0).toUpperCase() + completeUser.role.slice(1)}Dashboard`;
-      console.log('[DEBUG] Navigating to dashboard:', dashboardScreen);
+      // Update user context
+      setUser(userData);
       
-      // Reset navigation stack and navigate to dashboard
+      // Navigate to appropriate dashboard
+      const role = userData.role.toLowerCase();
       navigation.reset({
         index: 0,
-        routes: [{ name: dashboardScreen }],
+        routes: [{ name: `${role.charAt(0).toUpperCase() + role.slice(1)}Dashboard` }],
       });
 
     } catch (error) {
       console.error('Login error:', error);
-      
-      // Handle specific error cases with user-friendly messages
-      if (error.code === 'auth/user-not-found') {
-        setEmailError('No account found with this email');
-      } else if (error.code === 'auth/wrong-password') {
-        setPasswordError('Incorrect password');
-      } else if (error.code === 'auth/invalid-email') {
-        setEmailError('Please enter a valid email address');
-      } else if (error.code === 'auth/too-many-requests') {
-        setMessage('Too many failed attempts. Please try again later.');
-        setMessageType('error');
+      setMessageType('error');
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        setMessage('Invalid email or password');
       } else {
-        setMessage('Unable to sign in. Please check your credentials and try again.');
-        setMessageType('error');
+        setMessage('An error occurred during login. Please try again.');
       }
     } finally {
       setLoading(false);

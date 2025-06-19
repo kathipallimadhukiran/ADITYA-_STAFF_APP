@@ -693,12 +693,11 @@ export default function ViewLocationsScreen() {
                           </Text>
                         </View>
                       </View>
-                      
-                      <View style={styles.locationRow}>
+
+                      <View style={styles.metricRow}>
                         <Icon name="mountain" size={16} color="#457B9D" />
-                        <Text style={styles.locationText}>
-                          Altitude: {selectedUser.altitude.toFixed(2)}m
-                        </Text>
+                        <Text style={styles.metricLabel}>Altitude:</Text>
+                        <Text style={styles.metricValue}>{selectedUser.altitude?.toFixed(2)}m</Text>
                       </View>
 
                       <TouchableOpacity 
@@ -1227,5 +1226,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 6,
+  },
+  metricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+    borderRadius: 8,
+  },
+  metricLabel: {
+    fontSize: 14,
+    color: '#6C757D',
+    marginLeft: 8,
+    width: 80,
+  },
+  metricValue: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1D3557',
+    fontWeight: '500',
   },
 }); 

@@ -34,6 +34,7 @@ import { fetchUser } from "../../services/Firebase/firestoreService";
 import firebase from "firebase/app";
 import * as Location from 'expo-location';
 import { startLocationTracking, stopLocationTracking } from "../../services/LocationService";
+import LocationPermissionScreen from "../../components/LocationPermissionScreen";
 
 const DashboardScreen = () => {
   const navigation = useNavigation();
@@ -55,6 +56,7 @@ const DashboardScreen = () => {
   const REFRESH_INTERVAL = 20 * 60 * 1000; // 20 minutes in milliseconds
   const [nextRefreshTime, setNextRefreshTime] = useState(new Date());
   const [lastAbsentCheck, setLastAbsentCheck] = useState(null);
+  const [needsLocationPermission, setNeedsLocationPermission] = useState(false);
 
   
   const staffQuickActions = [
@@ -589,13 +591,6 @@ const DashboardScreen = () => {
         }
         lastAppStateChange = now;
 
-        if (prevState === 'background' && nextAppState === 'active') {
-          // Restart location tracking if user is authorized
-          if (currentUser?.email && ['staff', 'admin'].includes(user?.role?.toLowerCase())) {
-            await AsyncStorage.setItem('userEmail', currentUser.email.toLowerCase());
-            await startLocationTracking(true);
-          }
-        }
         appStateRef.current = nextAppState;
       });
 
@@ -1163,6 +1158,56 @@ const DashboardScreen = () => {
   const getRefreshCountdown = () => {
     return "Auto-refresh disabled";
   };
+
+  // Add this function to check location permissions
+  const checkLocationPermission = async () => {
+    if (!currentUser?.email || !['staff', 'admin'].includes(user?.role?.toLowerCase())) {
+      return;
+    }
+
+    try {
+      const foreground = await Location.getForegroundPermissionsAsync();
+      const background = await Location.getBackgroundPermissionsAsync();
+      const services = await Location.hasServicesEnabledAsync();
+
+      if (foreground.status === 'granted' && 
+          background.status === 'granted' && 
+          services) {
+        setNeedsLocationPermission(false);
+        await AsyncStorage.setItem('userEmail', currentUser.email.toLowerCase());
+        await startLocationTracking(true);
+      } else {
+        setNeedsLocationPermission(true);
+      }
+    } catch (error) {
+      console.error('Error checking permissions:', error);
+      setNeedsLocationPermission(true);
+    }
+  };
+
+  // Add this function to handle permission granted
+  const handleLocationPermissionGranted = async () => {
+    try {
+      setNeedsLocationPermission(false);
+      if (currentUser?.email) {
+        await AsyncStorage.setItem('userEmail', currentUser.email.toLowerCase());
+        await startLocationTracking(true);
+        // Force a refresh of the dashboard data
+        await refreshData();
+      }
+    } catch (error) {
+      console.error('[DEBUG] Error in handleLocationPermissionGranted:', error);
+    }
+  };
+
+  // Add this check at the beginning of your render
+  if (needsLocationPermission && ['staff', 'admin'].includes(user?.role?.toLowerCase())) {
+    return (
+      <LocationPermissionScreen 
+        onPermissionGranted={handleLocationPermissionGranted} 
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
