@@ -21,6 +21,7 @@ import RoleSelection from '../screens/Auth/RoleSelection';
 import DigitalIDCard from '../screens/Dashboard/DigitalIDCard';
 import Results from '../screens/student/ResultsSccreen';
 import AttendanceSettings from '../screens/Admin/AttendanceSettings';
+import LocationPermissionScreen from '../components/LocationPermissionScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -30,6 +31,14 @@ const DEFAULT_ROLE = 'student';
 
 // Common screens configuration shared between roles
 const commonScreens = [
+  {
+    name: "LocationPermissionScreen",
+    component: LocationPermissionScreen,
+    options: { 
+      headerShown: false,
+      gestureEnabled: false
+    }
+  },
   {
     name: "Profile",
     component: ProfileScreen,

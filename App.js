@@ -13,7 +13,8 @@ import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
 import { enableScreens } from 'react-native-screens';
 import { firebase } from './services/Firebase/firebaseConfig';
 import LocationPermissionScreen from './components/LocationPermissionScreen';
-import { startLocationTracking } from './services/LocationService';
+import LocationPermissionWrapper from './components/LocationPermissionWrapper';
+import { startLocationTracking, startPostLoginTracking, setNavigationReady } from './services/LocationService';
 
 // Enable native screens
 enableScreens();
@@ -64,8 +65,13 @@ LogBox.ignoreLogs([
 
 function AppContent() {
   const { user, isLoading } = useUser();
-  const [needsLocationPermission, setNeedsLocationPermission] = useState(false);
   const blinkAnim = React.useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (user?.email && ['staff', 'admin'].includes(user?.role?.toLowerCase())) {
+      startPostLoginTracking();
+    }
+  }, [user?.email, user?.role]);
 
   React.useEffect(() => {
     Animated.loop(
@@ -91,7 +97,6 @@ function AppContent() {
     const userRole = (user?.role || 'student').toLowerCase();
     const shouldNavigateToLogin = !user?.email;
     
-    // Map faculty role to StaffDashboard
     let initialRoute;
     if (isLoggedIn) {
       if (userRole === 'faculty') {
@@ -102,15 +107,6 @@ function AppContent() {
     } else {
       initialRoute = 'Login';
     }
-
-    console.log('[DEBUG] AppContent navigation state:', {
-      isLoggedIn,
-      userRole,
-      shouldNavigateToLogin,
-      initialRoute,
-      userEmail: user?.email,
-      userRoleRaw: user?.role
-    });
 
     return {
       isLoggedIn,
@@ -145,8 +141,13 @@ function AppContent() {
     );
   }
 
-  if (user?.email && ['staff', 'admin'].includes(user?.role?.toLowerCase()) && needsLocationPermission) {
-    return <LocationPermissionScreen onPermissionGranted={handleLocationPermissionGranted} />;
+  // For staff and admin users, wrap with LocationPermissionWrapper
+  if (user?.email && ['staff', 'admin'].includes(user?.role?.toLowerCase())) {
+    return (
+      <LocationPermissionWrapper>
+        <AppNavigator {...navigationState} />
+      </LocationPermissionWrapper>
+    );
   }
 
   return <AppNavigator {...navigationState} />;
@@ -154,6 +155,7 @@ function AppContent() {
 
 export default function App() {
   const [isReady, setIsReady] = useState(false);
+  const [navigationReady, setNavigationReady] = useState(false);
   const routeNameRef = useRef(null);
 
   useEffect(() => {
@@ -204,20 +206,8 @@ export default function App() {
                   onReady={() => {
                     routeNameRef.current = global.navigationRef.current?.getCurrentRoute()?.name;
                     console.log('[DEBUG] Navigation container ready');
-                    
-                    // Handle any pending navigation
-                    if (global.pendingNavigation) {
-                      const { route, action } = global.pendingNavigation;
-                      if (action === 'reset') {
-                        global.navigationRef.current?.dispatch(
-                          CommonActions.reset({
-                            index: 0,
-                            routes: [{ name: route }],
-                          })
-                        );
-                      }
-                      global.pendingNavigation = null;
-                    }
+                    setNavigationReady(true);
+                    setNavigationReady(true); // Set both local and LocationService state
                   }}
                   fallback={
                     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -228,7 +218,7 @@ export default function App() {
                     </View>
                   }
                 >
-                  {isReady ? <AppContent /> : null}
+                  {isReady && navigationReady ? <AppContent /> : null}
                 </NavigationContainer>
               </UserProvider>
             </AuthProvider>

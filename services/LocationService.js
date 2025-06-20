@@ -72,6 +72,25 @@ let hasInitialized = false;
 let lastInitAttempt = 0;
 const INIT_DEBOUNCE = 5000; // 5 seconds debounce for initialization attempts
 
+// Add navigation event emitter
+const locationPermissionNavigationEmitter = new NativeEventEmitter(NativeModules.LocationServicesModule || {});
+
+// Add a queue for pending navigation actions
+let pendingNavigationActions = [];
+let isNavigationReady = false;
+
+// Add function to handle navigation readiness
+const setNavigationReady = (ready) => {
+  isNavigationReady = ready;
+  if (ready) {
+    // Process any pending navigation actions
+    while (pendingNavigationActions.length > 0) {
+      const action = pendingNavigationActions.shift();
+      action();
+    }
+  }
+};
+
 const setupAppStateListener = () => {
   if (appStateSubscription) {
     appStateSubscription.remove();
@@ -670,60 +689,68 @@ const requestLocationPermissions = async () => {
 
 const startLocationTracking = async (isBackground = false) => {
   try {
-    // Check if tracking is already active to prevent multiple starts
+    console.log('[Location Service] Starting location tracking');
+    
+    // Check if tracking is already active
     const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
       .catch(() => false);
     
     if (isTracking) {
-      return;
+      console.log('[Location Service] Tracking already active');
+      return true;
     }
 
-    // Check if we're within working hours first
+    // Check working hours first
     const workingHoursCheck = await checkWorkingHours(true);
     if (!workingHoursCheck.isWithinWorkingHours) {
+      console.log('[Location Service] Outside working hours');
       await stopLocationTracking();
-      return;
+      return false;
     }
 
     // Check location permissions
     const permissionStatus = await getLocationPermissionStatus();
     if (!permissionStatus.allGranted) {
+      console.log('[Location Service] Location permissions not granted');
       await AsyncStorage.setItem('isTrackingActive', 'false');
-      return;
+      return false;
     }
 
     // Get user data
     const userData = await getCachedAuthData();
     if (!userData) {
-      return;
-    }
-
-    // Double check if tracking hasn't started while we were checking permissions
-    const isTrackingNow = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
-      .catch(() => false);
-    
-    if (isTrackingNow) {
-      return;
+      console.log('[Location Service] No user data available');
+      return false;
     }
 
     // Set tracking as active
     await setTrackingActive(true);
 
-    // Start location updates
-    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-      accuracy: Location.Accuracy.BestForNavigation,
-      timeInterval: LOCATION_UPDATE_INTERVAL,
-      distanceInterval: 0,
-      showsBackgroundLocationIndicator: true,
-      foregroundService: {
-        notificationTitle: 'Location Tracking Active',
-        notificationBody: 'Tracking your location for attendance',
-        notificationColor: '#4CAF50',
-      }
-    });
+    // Start location updates with enhanced error handling
+    try {
+      await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+        accuracy: Location.Accuracy.BestForNavigation,
+        timeInterval: LOCATION_UPDATE_INTERVAL,
+        distanceInterval: 0,
+        showsBackgroundLocationIndicator: true,
+        foregroundService: {
+          notificationTitle: 'Location Tracking Active',
+          notificationBody: 'Tracking your location for attendance',
+          notificationColor: '#4CAF50',
+        }
+      });
+      
+      console.log('[Location Service] Location updates started successfully');
+      return true;
+    } catch (error) {
+      console.error('[Location Service] Error starting location updates:', error);
+      await stopLocationTracking();
+      return false;
+    }
   } catch (error) {
-    console.error('[ERROR] Failed to start tracking:', error);
+    console.error('[Location Service] Error in startLocationTracking:', error);
     await stopLocationTracking();
+    return false;
   }
 };
 
@@ -975,7 +1002,7 @@ const isUserAuthorized = async () => {
     }
 
     const role = userData.role.toLowerCase();
-    const isAuthorizedRole = ['staff', 'admin'].includes(role);
+    const isAuthorizedRole = ['staff', 'admin', 'Super Admin'].includes(role);
     
     if (!isAuthorizedRole) {
       await stopLocationTracking();
@@ -984,6 +1011,7 @@ const isUserAuthorized = async () => {
 
     return true;
   } catch (error) {
+    console.error('[Location Service] Error checking user authorization:', error);
     return false;
   }
 };
@@ -1016,10 +1044,49 @@ const checkAndManageTracking = async () => {
   }
 };
 
+// Add new function for post-login tracking
+const startPostLoginTracking = async () => {
+  try {
+    console.log('[Location Service] Starting post-login tracking check');
+    
+    // Check working hours first
+    const workingHoursCheck = await checkWorkingHours(true);
+    console.log('[Location Service] Working hours check:', workingHoursCheck);
+
+    if (workingHoursCheck.isWithinWorkingHours) {
+      // Start location tracking
+      await startLocationTracking();
+      console.log('[Location Service] Location tracking started');
+      
+      // Start settings refresh to keep tracking active during duty hours
+      startSettingsRefresh();
+      
+      // Start monitoring location services
+      await monitorLocationServices();
+      
+      // Start recovery check to ensure tracking stays active
+      startRecoveryCheck();
+    } else {
+      console.log('[Location Service] Outside working hours, tracking not started');
+      await stopLocationTracking();
+    }
+  } catch (error) {
+    console.error('[Location Service] Error in post-login tracking:', error);
+  }
+};
+
+// Modify saveLocationToFirebase to include detailed logging
 const saveLocationToFirebase = async (location) => {
   try {
+    console.log('[Location Service] Attempting to save location:', {
+      latitude: location.coords?.latitude || location.latitude,
+      longitude: location.coords?.longitude || location.longitude,
+      timestamp: new Date().toISOString()
+    });
+
     const workingHoursCheck = await checkWorkingHours(true);
     if (!workingHoursCheck.isWithinWorkingHours) {
+      console.log('[Location Service] Outside working hours, stopping tracking');
       await stopLocationTracking();
       if (settingsRefreshInterval) {
         clearInterval(settingsRefreshInterval);
@@ -1042,6 +1109,7 @@ const saveLocationToFirebase = async (location) => {
 
     const userData = await getCachedAuthData();
     if (!userData?.email) {
+      console.log('[Location Service] No user data found');
       return false;
     }
 
@@ -1050,11 +1118,13 @@ const saveLocationToFirebase = async (location) => {
     const timeDiff = Math.abs(now - locationTime);
     
     if (timeDiff > 60000) {
+      console.log('[Location Service] Location data too old');
       return false;
     }
 
     const settings = await fetchSettings();
     if (!settings?.workingHours) {
+      console.log('[Location Service] No working hours settings found');
       await stopLocationTracking();
       return false;
     }
@@ -1079,6 +1149,7 @@ const saveLocationToFirebase = async (location) => {
     }
 
     if (currentMinutes < startMinutes || currentMinutes > endMinutes) {
+      console.log('[Location Service] Current time outside duty hours');
       await stopLocationTracking();
       return false;
     }
@@ -1089,6 +1160,7 @@ const saveLocationToFirebase = async (location) => {
     const longitude = coords.longitude || location.longitude;
     
     if (!latitude || !longitude) {
+      console.log('[Location Service] Invalid location data');
       return false;
     }
     
@@ -1115,6 +1187,8 @@ const saveLocationToFirebase = async (location) => {
       userRole: userData.role || 'staff'
     };
 
+    console.log('[Location Service] Saving location data:', locationData);
+
     const userEmail = userData.email.toLowerCase();
     await db.collection('locations')
       .doc(userEmail)
@@ -1124,9 +1198,10 @@ const saveLocationToFirebase = async (location) => {
         lastLocationTimestamp: new Date().getTime()
       }, { merge: true });
       
+    console.log('[Location Service] Location saved successfully');
     return true;
   } catch (error) {
-    console.error('[ERROR] Error saving location:', error);
+    console.error('[Location Service] Error saving location:', error);
     await saveLocationOffline(location);
     return false;
   }
@@ -1193,8 +1268,13 @@ const syncOfflineLocations = async () => {
   }
 };
 
-// Update monitorLocationServices to use the new status system
-const monitorLocationServices = async () => {
+// Modify monitorLocationServices to handle navigation initialization
+const monitorLocationServices = async (navigation) => {
+  if (!navigation) {
+    console.log('[Location Service] Navigation not initialized yet');
+    return;
+  }
+
   if (locationCheckInterval) {
     clearInterval(locationCheckInterval);
   }
@@ -1205,11 +1285,32 @@ const monitorLocationServices = async () => {
       await updateLocationPermissionStatus(status);
 
       if (!status.allGranted) {
+        console.log('[Location Service] Location permissions not fully granted');
+        
         // Stop any active tracking since location is not fully enabled/permitted
         const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
           .catch(() => false);
         if (isTracking) {
           await stopLocationTracking();
+        }
+
+        // Emit event for navigation
+        locationPermissionNavigationEmitter.emit('requireLocationPermission', true);
+        
+        // If navigation is provided and initialized, navigate to permission screen
+        if (navigation && navigation.getCurrentRoute) {
+          const currentRoute = navigation.getCurrentRoute()?.name;
+          if (currentRoute !== 'LocationPermissionScreen') {
+            navigation.reset({
+              index: 0,
+              routes: [
+                { 
+                  name: 'LocationPermissionScreen',
+                  params: { returnTo: currentRoute }
+                }
+              ],
+            });
+          }
         }
       } else {
         // Check if tracking should be active and restart if needed
@@ -1223,13 +1324,14 @@ const monitorLocationServices = async () => {
         }
       }
     } catch (error) {
+      console.error('[Location Service] Error in location status check:', error);
     }
   };
 
   // Check immediately
   await checkLocationStatus();
   
-  // Then check frequently (every 1 second)
+  // Then check frequently
   locationCheckInterval = setInterval(checkLocationStatus, 1000);
 
   // Add event listener for location changes if available
@@ -1238,6 +1340,29 @@ const monitorLocationServices = async () => {
       checkLocationStatus();
     });
   }
+
+  return () => {
+    if (locationCheckInterval) {
+      clearInterval(locationCheckInterval);
+    }
+  };
+};
+
+// Add function to check if location permission is required
+const isLocationPermissionRequired = async () => {
+  const status = await getLocationPermissionStatus();
+  return !status.allGranted;
+};
+
+// Add new function to handle location permission navigation
+const handleLocationPermissionNavigation = (navigation) => {
+  if (!navigation) return;
+  
+  // Navigate to LocationPermissionScreen
+  navigation.reset({
+    index: 0,
+    routes: [{ name: 'LocationPermissionScreen' }],
+  });
 };
 
 // Add this function to verify location requirements
@@ -1456,6 +1581,67 @@ const startWorkingHoursCheck = () => {
 // Start the working hours check when the module loads
 startWorkingHoursCheck();
 
+// Add new function to ensure location tracking is active
+const ensureLocationTrackingStarted = async () => {
+  try {
+    console.log('[Location Service] Checking location tracking status');
+    
+    // Check if tracking is currently active
+    const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
+      .catch(() => false);
+    
+    if (!isTracking) {
+      console.log('[Location Service] Location tracking not active, attempting to start');
+      
+      // Verify location permissions first
+      const permissionStatus = await getLocationPermissionStatus();
+      if (!permissionStatus.allGranted) {
+        console.log('[Location Service] Requesting location permissions');
+        const granted = await requestLocationPermissions();
+        if (!granted) {
+          console.log('[Location Service] Location permissions not granted');
+          return false;
+        }
+      }
+
+      // Check if location services are enabled
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        console.log('[Location Service] Location services not enabled');
+        await showLocationAlert();
+        return false;
+      }
+
+      // Check working hours
+      const workingHoursCheck = await checkWorkingHours(true);
+      console.log('[Location Service] Working hours check:', workingHoursCheck);
+
+      if (workingHoursCheck.isWithinWorkingHours) {
+        // Start location tracking
+        await startLocationTracking();
+        console.log('[Location Service] Location tracking started successfully');
+        
+        // Start all monitoring services
+        startSettingsRefresh();
+        await monitorLocationServices();
+        startRecoveryCheck();
+        startWorkingHoursCheck();
+        
+        return true;
+      } else {
+        console.log('[Location Service] Outside working hours, tracking not started');
+        return false;
+      }
+    } else {
+      console.log('[Location Service] Location tracking is already active');
+      return true;
+    }
+  } catch (error) {
+    console.error('[Location Service] Error ensuring location tracking:', error);
+    return false;
+  }
+};
+
 export {
   startLocationTracking,
   stopLocationTracking,
@@ -1466,5 +1652,10 @@ export {
   monitorLocationServices,
   verifyLocationRequirements,
   getLocationPermissionStatus,
-  locationPermissionEmitter
+  locationPermissionEmitter,
+  startPostLoginTracking,
+  ensureLocationTrackingStarted,
+  isLocationPermissionRequired,
+  locationPermissionNavigationEmitter,
+  checkWorkingHours
 };
