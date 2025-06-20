@@ -51,6 +51,11 @@ const commonScreens = [
     options: { headerShown: true }
   },
   {
+    name: "EditSchedulePage",
+    component: EditSchedulePage,
+    options: { headerShown: true, title: 'Edit Schedule' }
+  },
+  {
     name: "MyTasksScreen",
     component: MyTasksScreen,
     options: { headerShown: true, title: 'My Tasks' }

@@ -48,8 +48,7 @@ const Attendance_fig_cam = () => {
   const [userData, setUserData] = useState(route.params?.userData || null);
   const cameraRef = useRef(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const DEFAULT_API_URL = 'https://face-recognition-final.onrender.com';
-  const [API_URL, setApiUrl] = useState(DEFAULT_API_URL);
+  const [API_URL, setApiUrl] = useState(null);
   const [attendanceSettings, setAttendanceSettings] = useState({
     startTime: '09:00',
     endTime: '17:00',
@@ -78,10 +77,24 @@ const Attendance_fig_cam = () => {
           if (api_url) {
             console.log('[DEBUG] Using API URL from Firebase:', api_url);
             setApiUrl(api_url);
+          } else {
+            Alert.alert(
+              "Configuration Error",
+              "API URL not configured. Please contact administrator."
+            );
           }
+        } else {
+          Alert.alert(
+            "Configuration Error",
+            "API configuration not found. Please contact administrator."
+          );
         }
       } catch (error) {
-        console.log('[DEBUG] Error fetching API URL from Firebase, using default:', error);
+        console.log('[DEBUG] Error fetching API URL from Firebase:', error);
+        Alert.alert(
+          "Connection Error",
+          "Failed to fetch API configuration. Please try again later."
+        );
       }
     };
 
@@ -312,6 +325,14 @@ const Attendance_fig_cam = () => {
   };
 
   const takePicture = async () => {
+    if (!API_URL) {
+      Alert.alert(
+        "Configuration Error",
+        "API URL not configured. Please contact administrator."
+      );
+      return;
+    }
+    
     if (!cameraRef.current) {
       console.error("Camera ref not available");
       return;

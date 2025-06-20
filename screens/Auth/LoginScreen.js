@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, ScrollView, Alert, Modal, Image } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, ScrollView, Alert, Modal, Image, Animated, Easing } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { firebase, getAuth, db, isInitialized } from '../../services/Firebase/firebaseConfig';
 import { fetchUser, isEmailAuthorized, updateUserLastLogin, checkAdminVerificationStatus } from '../../services/Firebase/firestoreService';
@@ -57,10 +57,54 @@ const LoginScreen = ({ navigation }) => {
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
   const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
 
   useEffect(() => {
     checkAutoLogin();
   }, []);
+
+  useEffect(() => {
+    if (loading || isInitializing) {
+      // Reset animations
+      fadeAnim.setValue(0);
+      scaleAnim.setValue(0.95);
+
+      // Start parallel animations
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 1000,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 1,
+          duration: 1000,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        // After initial animation, start subtle floating effect
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(scaleAnim, {
+              toValue: 1.05,
+              duration: 1500,
+              easing: Easing.bezier(0.4, 0, 0.2, 1),
+              useNativeDriver: true,
+            }),
+            Animated.timing(scaleAnim, {
+              toValue: 1,
+              duration: 1500,
+              easing: Easing.bezier(0.4, 0, 0.2, 1),
+              useNativeDriver: true,
+            }),
+          ])
+        ).start();
+      });
+    }
+  }, [loading, isInitializing, fadeAnim, scaleAnim]);
 
   const checkAutoLogin = async () => {
     try {
@@ -518,10 +562,23 @@ const LoginScreen = ({ navigation }) => {
     </Modal>
   );
 
-  if (isInitializing) {
+  if (isInitializing || loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#f97316" />
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Animated.View style={{ 
+          opacity: fadeAnim,
+          transform: [{ scale: scaleAnim }],
+          alignItems: 'center'
+        }}>
+          <Image
+            source={require('../../assets/college-logo.png')}
+            style={{
+              width: 150,
+              height: 150,
+              resizeMode: 'contain'
+            }}
+          />
+        </Animated.View>
       </View>
     );
   }
@@ -535,13 +592,19 @@ const LoginScreen = ({ navigation }) => {
         <ScrollView contentContainerStyle={styles.scrollContainer}>
           <Text style={styles.heading}>ADITYA UNIVERSITY</Text>
 
-          <View style={styles.logoContainer}>
+          <Animated.View style={[
+            styles.logoContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }]
+            }
+          ]}>
             <Image
               source={require('../../assets/college-logo.png')}
               style={styles.logo}
               resizeMode="contain"
             />
-          </View>
+          </Animated.View>
 
           <Text style={styles.title}>Email Login</Text>
 
@@ -565,6 +628,7 @@ const LoginScreen = ({ navigation }) => {
             <TextInput
               style={[styles.input, styles.passwordInput]}
               placeholder="Password"
+              placeholderTextColor="#a1a1aa"
               secureTextEntry={!showPassword}
               value={password}
               onChangeText={setPassword}
@@ -653,8 +717,9 @@ const styles = StyleSheet.create({
     height: 200, // Adjust this value based on your needs
   },
   logo: {
-    width: '80%',
-    height: '100%',
+    width: 150,
+    height: 150,
+    marginBottom: 20,
   },
   title: {
     fontSize: 30,
@@ -874,10 +939,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
   },
-  loadingContainer: {
+  container: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     backgroundColor: '#fff7ed',
   },
 });

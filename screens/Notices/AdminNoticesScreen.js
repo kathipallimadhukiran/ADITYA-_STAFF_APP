@@ -135,6 +135,8 @@ const AdminNoticesScreen = ({ onNoticeAdded }) => {
                 value={newNotice.title}
                 onChangeText={(text) => setNewNotice({ ...newNotice, title: text })}
                 placeholder="Enter notice title"
+                placeholderTextColor="#a1a1aa"
+                color="#1D3557"
               />
 
               <Text style={styles.inputLabel}>Description*</Text>
@@ -143,6 +145,8 @@ const AdminNoticesScreen = ({ onNoticeAdded }) => {
                 value={newNotice.description}
                 onChangeText={(text) => setNewNotice({ ...newNotice, description: text })}
                 placeholder="Enter notice description"
+                placeholderTextColor="#a1a1aa"
+                 color="#1D3557"
                 multiline
                 numberOfLines={4}
               />
@@ -153,6 +157,8 @@ const AdminNoticesScreen = ({ onNoticeAdded }) => {
                 value={newNotice.department}
                 onChangeText={(text) => setNewNotice({ ...newNotice, department: text })}
                 placeholder="Enter department name"
+                placeholderTextColor="#a1a1aa"
+                 color="#1D3557"
               />
 
               <Text style={styles.inputLabel}>Target Audience</Text>
@@ -197,6 +203,8 @@ const AdminNoticesScreen = ({ onNoticeAdded }) => {
                 value={newNotice.emailCopy}
                 onChangeText={(text) => setNewNotice({ ...newNotice, emailCopy: text })}
                 placeholder="Enter email addresses (comma-separated)"
+                placeholderTextColor="#a1a1aa"
+                 color="#1D3557"
                 keyboardType="email-address"
               />
 

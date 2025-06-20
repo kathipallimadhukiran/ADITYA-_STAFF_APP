@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { NavigationContainer, CommonActions } from '@react-navigation/native';
-import { View, LogBox, Platform, ActivityIndicator, StatusBar, Text } from 'react-native';
+import { View, LogBox, Platform, ActivityIndicator, StatusBar, Text, Image, Animated, Easing } from 'react-native';
 import * as Location from 'expo-location';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -65,6 +65,26 @@ LogBox.ignoreLogs([
 function AppContent() {
   const { user, isLoading } = useUser();
   const [needsLocationPermission, setNeedsLocationPermission] = useState(false);
+  const blinkAnim = React.useRef(new Animated.Value(1)).current;
+
+  React.useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(blinkAnim, {
+          toValue: 0,
+          duration: 500,
+          easing: Easing.step0,
+          useNativeDriver: true,
+        }),
+        Animated.timing(blinkAnim, {
+          toValue: 1,
+          duration: 500,
+          easing: Easing.step0,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, [blinkAnim]);
 
   const navigationState = useMemo(() => {
     const isLoggedIn = !!user?.email;
@@ -102,11 +122,25 @@ function AppContent() {
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background }}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
-        <Text style={{ marginTop: 10, color: theme.colors.primary }}>
-          Loading user data...
-        </Text>
+      <View style={{ 
+        flex: 1, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        backgroundColor: theme.colors.background 
+      }}>
+        <Animated.View style={{ 
+          opacity: blinkAnim,
+          alignItems: 'center'
+        }}>
+          <Image
+            source={require('./assets/college-logo.png')}
+            style={{
+              width: 150,
+              height: 150,
+              resizeMode: 'contain'
+            }}
+          />
+        </Animated.View>
       </View>
     );
   }

@@ -13,6 +13,8 @@ import {
   Image,
   AppState,
   Platform,
+  Animated,
+  Easing,
 } from "react-native";
 import Icon from "react-native-vector-icons/FontAwesome5";
 import { getAuth, db } from "../../services/Firebase/firebaseConfig";
@@ -56,6 +58,7 @@ const DashboardScreen = ({ route }) => {
   const [nextRefreshTime, setNextRefreshTime] = useState(new Date());
   const [lastAbsentCheck, setLastAbsentCheck] = useState(null);
   const [needsLocationPermission, setNeedsLocationPermission] = useState(false);
+  const blinkAnim = useRef(new Animated.Value(1)).current;
 
   // Get userType from route params
   const userType = route?.params?.userType?.toLowerCase() || 'student';
@@ -321,7 +324,11 @@ const DashboardScreen = ({ route }) => {
       // Format the date to match the database format (M/D/YYYY)
       const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
 
-      // Get monthly attendance records first
+      // Get attendance settings first
+      const settingsDoc = await db.collection('settings').doc('attendance').get();
+      const settings = settingsDoc.exists ? settingsDoc.data() : null;
+
+      // Get monthly attendance records
       const monthlyRecordsRef = db
         .collection('user_attendance')
         .doc(email)
@@ -338,6 +345,31 @@ const DashboardScreen = ({ route }) => {
       let dailyRecords = [];
       let todayAttendanceFound = false;
 
+      // Calculate total working days in the month
+      const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(today.getFullYear(), today.getMonth(), day);
+        const dayName = date.toLocaleString('default', { weekday: 'long' });
+        const dateStr = date.toISOString().split('T')[0];
+
+        // Skip if it's a holiday
+        if (settings?.holidays?.some(holiday => holiday.date === dateStr)) {
+          continue;
+        }
+
+        // Skip if it's not a working day
+        if (!settings?.workingDays?.[dayName]?.isWorking) {
+          continue;
+        }
+
+        // If we've reached today's date, stop counting future days
+        if (day > today.getDate()) {
+          break;
+        }
+
+        totalWorkingDays++;
+      }
+
       monthlyDocs.forEach(doc => {
         const data = doc.data();
 
@@ -347,7 +379,6 @@ const DashboardScreen = ({ route }) => {
           todayAttendanceFound = true;
         }
 
-        totalWorkingDays++;
         dailyRecords.push({
           day: data.date,
           status: data.status,
@@ -361,24 +392,10 @@ const DashboardScreen = ({ route }) => {
 
         if (data.status === 'Present') {
           presentCount++;
-          // Check if marked late (after 9:30 AM)
-          if (data.timeStr) {
-            const timeStr = data.timeStr.split(' ')[0]; // Remove AM/PM
-            const [hours, minutes] = timeStr.split(':').map(Number);
-            const isPM = data.timeStr.toLowerCase().includes('pm');
-            let hour24 = hours;
-
-            if (isPM && hours !== 12) {
-              hour24 = hours + 12;
-            } else if (!isPM && hours === 12) {
-              hour24 = 0;
-            }
-
-            if (hour24 > 9 || (hour24 === 9 && minutes > 30)) {
-              lateCount++;
-            }
-          }
-        } else {
+        } else if (data.status === 'Late') {
+          presentCount++; // Count late as present
+          lateCount++;
+        } else if (data.status === 'Absent') {
           absentCount++;
         }
       });
@@ -400,7 +417,7 @@ const DashboardScreen = ({ route }) => {
         present: presentCount,
         absent: absentCount,
         late: lateCount,
-        percentage: totalWorkingDays > 0 ? (presentCount / totalWorkingDays) * 100 : 0,
+        percentage: totalWorkingDays > 0 ? ((presentCount / totalWorkingDays) * 100) : 0,
         dailyRecords
       };
 
@@ -1232,6 +1249,25 @@ const DashboardScreen = ({ route }) => {
     );
   }
 
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(blinkAnim, {
+          toValue: 0,
+          duration: 500,
+          easing: Easing.step0,
+          useNativeDriver: true,
+        }),
+        Animated.timing(blinkAnim, {
+          toValue: 1,
+          duration: 500,
+          easing: Easing.step0,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, [blinkAnim]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       {user ? (
@@ -1453,7 +1489,16 @@ const DashboardScreen = ({ route }) => {
         </>
       ) : (
         <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-          <Text style={{ fontSize: 16, color: '#1D3557' }}>Loading user data...</Text>
+          <Animated.View style={{ opacity: blinkAnim, alignItems: 'center' }}>
+            <Image
+              source={require('../../assets/college-logo.png')}
+              style={{
+                width: 150,
+                height: 150,
+                resizeMode: 'contain'
+              }}
+            />
+          </Animated.View>
         </View>
       )}
     </SafeAreaView>

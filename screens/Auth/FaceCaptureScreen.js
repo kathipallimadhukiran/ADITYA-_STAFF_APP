@@ -18,7 +18,6 @@ import { db } from '../../services/Firebase/firebaseConfig';
 const MAX_CAPTURES = 5;
 const { width } = Dimensions.get('window');
 const CIRCLE_SIZE = width * 0.7;
-const DEFAULT_API_URL = 'http://192.168.94.111:5000';
 
 export default function FaceCaptureScreen({ navigation, route }) {
   const cameraRef = useRef(null);
@@ -28,7 +27,7 @@ export default function FaceCaptureScreen({ navigation, route }) {
   const [flashMode, setFlashMode] = useState('off');
   const [captureCount, setCaptureCount] = useState(0);
   const [trainingProgress, setTrainingProgress] = useState(0);
-  const [API_URL, setApiUrl] = useState(DEFAULT_API_URL);
+  const [API_URL, setApiUrl] = useState(null);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('');
   
@@ -45,10 +44,18 @@ export default function FaceCaptureScreen({ navigation, route }) {
           if (api_url) {
             console.log('[DEBUG] Using API URL from Firebase:', api_url);
             setApiUrl(api_url);
+          } else {
+            setMessage('API URL not configured. Please contact administrator.');
+            setMessageType('error');
           }
+        } else {
+          setMessage('API configuration not found. Please contact administrator.');
+          setMessageType('error');
         }
       } catch (error) {
-        console.log('[DEBUG] Error fetching API URL from Firebase, using default:', error);
+        console.log('[DEBUG] Error fetching API URL from Firebase:', error);
+        setMessage('Failed to fetch API configuration. Please try again later.');
+        setMessageType('error');
       }
     };
 

@@ -1,5 +1,5 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { View, Text, ActivityIndicator, Platform } from 'react-native';
+import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
+import { View, Text, ActivityIndicator, Platform, Image, Animated, Easing } from 'react-native';
 import { firebase } from '../services/Firebase/firebaseConfig';
 import { getAuthState, clearAuthState, setAuthState, isFirstInstall } from '../services/Firebase/authUtils';
 import * as Notifications from 'expo-notifications';
@@ -65,6 +65,8 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authError, setAuthError] = useState(null);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
 
   // Set up notifications
   useEffect(() => {
@@ -277,13 +279,70 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (initializing) {
+      // Reset animations
+      fadeAnim.setValue(0);
+      scaleAnim.setValue(0.95);
+
+      // Start parallel animations
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 1000,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 1,
+          duration: 1000,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        // After initial animation, start subtle floating effect
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(scaleAnim, {
+              toValue: 1.05,
+              duration: 1500,
+              easing: Easing.bezier(0.4, 0, 0.2, 1),
+              useNativeDriver: true,
+            }),
+            Animated.timing(scaleAnim, {
+              toValue: 1,
+              duration: 1500,
+              easing: Easing.bezier(0.4, 0, 0.2, 1),
+              useNativeDriver: true,
+            }),
+          ])
+        ).start();
+      });
+    }
+  }, [initializing, fadeAnim, scaleAnim]);
+
   if (initializing) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#f97316" />
-        <Text style={{ marginTop: 10, color: '#1D3557' }}>
-          Loading user data...
-        </Text>
+      <View style={{ 
+        flex: 1, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        backgroundColor: '#fff7ed' 
+      }}>
+        <Animated.View style={{ 
+          opacity: fadeAnim,
+          transform: [{ scale: scaleAnim }],
+          alignItems: 'center'
+        }}>
+          <Image
+            source={require('../assets/college-logo.png')}
+            style={{
+              width: 150,
+              height: 150,
+              resizeMode: 'contain'
+            }}
+          />
+        </Animated.View>
       </View>
     );
   }
