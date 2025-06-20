@@ -61,47 +61,85 @@ const AttendanceSettings = ({ navigation }) => {
   const [showHolidayDatePicker, setShowHolidayDatePicker] = useState(false);
 
   useEffect(() => {
-    loadSettings();
-  }, []);
+    let unsubscribe;
+    let intervalId;
 
-  const loadSettings = async () => {
-    try {
-      setInitialLoading(true);
-      const doc = await db.collection('settings').doc('attendance').get();
-      
-      if (doc.exists) {
-        const data = doc.data();
-        // Ensure all required fields exist
-        const workingDays = data.workingDays || defaultSettings.workingDays;
-        const holidays = Array.isArray(data.holidays) ? data.holidays : [];
+    const setupRealtimeUpdates = async () => {
+      try {
+        // Set up real-time listener
+        unsubscribe = db.collection('settings').doc('attendance')
+          .onSnapshot((doc) => {
+            if (doc.exists) {
+              const data = doc.data();
+              // Ensure all required fields exist
+              const workingDays = data.workingDays || defaultSettings.workingDays;
+              const holidays = Array.isArray(data.holidays) ? data.holidays : [];
 
-        // Convert old format to new format if necessary
-        const convertedData = {
-          workingDays: Object.keys(workingDays).reduce((acc, day) => ({
-            ...acc,
-            [day]: {
-              isWorking: typeof workingDays[day] === 'boolean' ? workingDays[day] : workingDays[day]?.isWorking ?? defaultSettings.workingDays[day].isWorking,
-              ...defaultDayTiming,
-              ...(typeof workingDays[day] === 'object' ? workingDays[day] : {})
+              // Convert old format to new format if necessary
+              const convertedData = {
+                workingDays: Object.keys(workingDays).reduce((acc, day) => ({
+                  ...acc,
+                  [day]: {
+                    isWorking: typeof workingDays[day] === 'boolean' ? workingDays[day] : workingDays[day]?.isWorking ?? defaultSettings.workingDays[day].isWorking,
+                    ...defaultDayTiming,
+                    ...(typeof workingDays[day] === 'object' ? workingDays[day] : {})
+                  }
+                }), {}),
+                holidays
+              };
+
+              setSettings(convertedData);
+              setInitialLoading(false);
             }
-          }), {}),
-          holidays
-        };
+          }, (error) => {
+            console.error('[DEBUG] Error in real-time listener:', error);
+          });
 
-        setSettings(convertedData);
-      } else {
-        // If no settings exist, create with defaults
-        await db.collection('settings').doc('attendance').set(defaultSettings);
-        setSettings(defaultSettings);
+        // Also fetch every 20 seconds as a backup
+        intervalId = setInterval(async () => {
+          try {
+            const doc = await db.collection('settings').doc('attendance').get();
+            if (doc.exists) {
+              const data = doc.data();
+              const workingDays = data.workingDays || defaultSettings.workingDays;
+              const holidays = Array.isArray(data.holidays) ? data.holidays : [];
+
+              const convertedData = {
+                workingDays: Object.keys(workingDays).reduce((acc, day) => ({
+                  ...acc,
+                  [day]: {
+                    isWorking: typeof workingDays[day] === 'boolean' ? workingDays[day] : workingDays[day]?.isWorking ?? defaultSettings.workingDays[day].isWorking,
+                    ...defaultDayTiming,
+                    ...(typeof workingDays[day] === 'object' ? workingDays[day] : {})
+                  }
+                }), {}),
+                holidays
+              };
+
+              setSettings(convertedData);
+            }
+          } catch (error) {
+            console.error('[DEBUG] Error in interval fetch:', error);
+          }
+        }, 20000); // Fetch every 20 seconds
+      } catch (error) {
+        console.error('[DEBUG] Error setting up real-time updates:', error);
+        setInitialLoading(false);
       }
-    } catch (error) {
-      console.error('[DEBUG] Error loading settings:', error);
-      Alert.alert('Error', 'Failed to load attendance settings. Using default settings.');
-      setSettings(defaultSettings);
-    } finally {
-      setInitialLoading(false);
-    }
-  };
+    };
+
+    setupRealtimeUpdates();
+
+    // Cleanup function
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, []);
 
   const saveSettings = async () => {
     try {

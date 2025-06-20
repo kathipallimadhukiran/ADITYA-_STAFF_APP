@@ -11,33 +11,38 @@ import { firebase as firebaseInstance, getAuth, db } from './Firebase/firebaseCo
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { saveLocationToMongo, saveLocationOffline, syncOfflineLocations } from './mongoService';
+import env from '../config/env';
 
 // Constants
 const LOCATION_TASK_NAME = 'background-location-task';
 const RECOVERY_TASK_NAME = 'location-recovery-task';
 const BACKGROUND_FETCH_TASK = 'background-fetch-task';
 const LOCATION_UPDATE_INTERVAL = 20000; // 20 seconds
-const RECOVERY_INTERVAL = 20000; // 20 seconds
-const LOCATION_DISTANCE_INTERVAL = 0; // Remove distance interval to ensure time-based updates
+const RECOVERY_INTERVAL = 60000; // Increased to 1 minute to save battery
+const LOCATION_DISTANCE_INTERVAL = 10; // Only update if moved 10 meters
 const BACKGROUND_UPDATE_INTERVAL = 20000; // 20 seconds
-const BACKGROUND_DISTANCE_INTERVAL = 0; // Remove distance interval
+const BACKGROUND_DISTANCE_INTERVAL = 10; // Only update if moved 10 meters
 const TRACKING_ENABLED_KEY = '@location_tracking_enabled';
 const LAST_USER_KEY = '@last_user_email';
 const USER_AUTH_KEY = '@user_auth_data';
 const OFFLINE_LOCATIONS_KEY = '@offline_locations';
-const STATE_CHANGE_DEBOUNCE = 20000; // 20 second debounce for state changes
-const SETTINGS_REFRESH_INTERVAL = 20000; // 20 seconds
+const STATE_CHANGE_DEBOUNCE = 30000; // Increased to 30 seconds
+const SETTINGS_REFRESH_INTERVAL = 60000; // Increased to 1 minute
 const SETTINGS_CACHE_KEY = '@attendance_settings_cache';
 const USER_DATA_CACHE_KEY = '@user_data_cache';
 const USER_DATA_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 const LOCATION_PERMISSION_STATUS = '@location_permission_status';
-const WORKING_HOURS_CHECK_INTERVAL = 20000; // 20 seconds
+const WORKING_HOURS_CHECK_INTERVAL = 60000; // Increased to 1 minute
 const TRACKING_STATE_KEY = '@location_tracking_state';
+const BATTERY_OPTIMIZATION_THRESHOLD = 20; // Battery percentage threshold for optimization
 
 // Track active state
 let _isTrackingActive = false;
 let lastLocationUpdate = null;
 let cachedAuthData = null;
+let lastBatteryLevel = 100;
+let isInLowPowerMode = false;
 
 // Function to safely update tracking state
 const setTrackingActive = async (value) => {
@@ -132,6 +137,12 @@ const cacheAuthData = async () => {
 
 const getCachedAuthData = async () => {
   try {
+    // First check if we're in working hours
+    const workingHoursCheck = await checkWorkingHours();
+    if (!workingHoursCheck.isWithinWorkingHours) {
+      return null; // Don't require permissions outside working hours
+    }
+
     // First check if we have valid cached data
     if (cachedAuthData) {
       return cachedAuthData;
@@ -184,32 +195,103 @@ TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
   }
 });
 
+// Add battery optimization function
+const optimizeForBattery = async () => {
+  try {
+    const batteryStatus = await getBatteryStatus();
+    const batteryLevel = batteryStatus?.batteryLevel || 1;
+    lastBatteryLevel = batteryLevel * 100;
+    
+    // Enable low power mode if battery is below threshold
+    isInLowPowerMode = lastBatteryLevel <= BATTERY_OPTIMIZATION_THRESHOLD;
+    
+    return isInLowPowerMode;
+  } catch (error) {
+    return false;
+  }
+};
+
+// Modify getAndSaveLocation function
 const getAndSaveLocation = async () => {
   try {
     // Check working hours first
-    const workingHoursCheck = await checkWorkingHours();
+    const workingHoursCheck = await checkWorkingHours(true); // Force fresh check
     if (!workingHoursCheck.isWithinWorkingHours) {
+      console.log('[Location Service] Outside working hours, skipping location update');
       return;
     }
 
-    const location = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.BestForNavigation,
-      maximumAge: 0,
-      timeout: 5000
-    });
+    // Get user data first to ensure we have valid credentials
+    const userData = await getCachedAuthData();
+    if (!userData?.email) {
+      console.log('[Location Service] No user data available, skipping location update');
+      return;
+    }
+
+    // Check battery status and optimize if needed
+    const isLowPower = await optimizeForBattery();
     
-    // Validate location object
-    if (!location || !location.coords || !location.coords.latitude || !location.coords.longitude) {
-      return;
-    }
+    const locationOptions = {
+      accuracy: isLowPower ? Location.Accuracy.Balanced : Location.Accuracy.BestForNavigation,
+      maximumAge: isLowPower ? 30000 : 0, // Allow 30s old locations in low power mode
+      timeout: isLowPower ? 10000 : 5000,
+      distanceInterval: isLowPower ? 20 : LOCATION_DISTANCE_INTERVAL // Increase distance threshold in low power mode
+    };
 
-    try {
-      await saveLocationToFirebase(location);
-    } catch (error) {
-      // Save to offline storage as backup
-      await saveLocationOffline(location);
+    console.log('[Location Service] Attempting to get current location');
+    const location = await Location.getCurrentPositionAsync(locationOptions);
+
+    if (location) {
+      const deviceInfo = await getDeviceInfo();
+      const locationData = {
+        accuracy: location.coords.accuracy,
+        altitude: location.coords.altitude,
+        appState: AppState.currentState,
+        createdAt: new Date().toISOString(),
+        deviceInfo,
+        heading: location.coords.heading,
+        isBackground: AppState.currentState !== 'active',
+        lastUpdate: new Date().toISOString(),
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        speed: location.coords.speed,
+        timestamp: location.timestamp,
+        userId: userData.email,
+        userRole: userData.role,
+        batteryLevel: lastBatteryLevel,
+        isLowPowerMode: isInLowPowerMode,
+        workingHours: workingHoursCheck.workingHours // Include working hours info
+      };
+
+      console.log('[Location Service] Saving location to MongoDB:', {
+        latitude: locationData.latitude,
+        longitude: locationData.longitude,
+        timestamp: locationData.timestamp
+      });
+
+      // Only save to MongoDB
+      try {
+        await saveLocationToMongo(locationData);
+        console.log('[Location Service] Successfully saved to MongoDB');
+        lastLocationUpdate = new Date();
+      } catch (mongoError) {
+        console.error('[Location Service] Failed to save to MongoDB:', mongoError);
+        // Save offline as backup
+        await saveLocationOffline(locationData);
+        console.log('[Location Service] Saved location data offline');
+      }
+    } else {
+      console.log('[Location Service] No location data received');
     }
   } catch (error) {
+    console.error('[Location Service] Error in getAndSaveLocation:', error);
+    // Try to save the error for debugging
+    try {
+      await AsyncStorage.setItem('lastLocationError', JSON.stringify({
+        error: error.message,
+        timestamp: new Date().toISOString()
+      }));
+    } catch (storageError) {}
   }
 };
 
@@ -229,63 +311,18 @@ TaskManager.defineTask(RECOVERY_TASK_NAME, async () => {
   }
 });
 
-TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data: { locations }, error }) => {
   if (error) {
+    console.error('[Location Service] Background location task error:', error);
     return;
   }
 
-  // Check working hours first before processing any locations
-  const workingHoursCheck = await checkWorkingHours();
-  if (!workingHoursCheck.isWithinWorkingHours) {
-    await stopLocationTracking();
-    return;
-  }
-
-  if (data) {
-    const { locations } = data;
-    if (!locations || locations.length === 0) return;
-
+  if (locations && locations.length > 0) {
+    const location = locations[locations.length - 1];
     try {
-      // Get user data
-      const userData = await getCachedAuthData();
-      if (!userData) return;
-
-      // Get device info
-      const deviceInfo = await getDeviceInfo();
-
-      // Process locations only if we're within working hours
-      for (const location of locations) {
-        const locationData = {
-          accuracy: location.coords.accuracy,
-          altitude: location.coords.altitude,
-          appState: AppState.currentState,
-          createdAt: new Date().toISOString(),
-          deviceInfo: {
-            brand: deviceInfo.brand || "",
-            isDevice: deviceInfo.isDevice,
-            manufacturer: deviceInfo.manufacturer || "",
-            model: deviceInfo.model || "",
-            osVersion: deviceInfo.osVersion || "",
-          },
-          heading: location.coords.heading || 0,
-          isBackground: AppState.currentState !== 'active',
-          lastUpdate: new Date().toISOString(),
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          speed: location.coords.speed || 0,
-          timestamp: new Date().toISOString(),
-          userId: userData.email,
-          userRole: userData.role
-        };
-
-        const saved = await saveLocationToFirebase(locationData);
-        if (!saved) {
-          await stopLocationTracking();
-          return;
-        }
-      }
+      await getAndSaveLocation();
     } catch (error) {
-      await stopLocationTracking();
+      console.error('[Location Service] Error in background location task:', error);
     }
   }
 });
@@ -449,27 +486,78 @@ const getUserData = async (forceFresh = false) => {
 };
 
 let lastWorkingHoursCheck = null;
+let lastWorkingHoursCheckTime = null;
+const WORKING_HOURS_CACHE_DURATION = 10000; // 10 seconds cache
+
+// Utility function to normalize time format
+const normalizeTimeFormat = (timeStr) => {
+  if (!timeStr) return null;
+  // Remove any extra whitespace
+  timeStr = timeStr.trim();
+  // Add leading zero if needed
+  if (timeStr.length === 4 && timeStr.includes(':')) {
+    timeStr = '0' + timeStr;
+  }
+  return timeStr;
+};
+
+// Utility function to validate time format
+const isValidTimeFormat = (timeStr) => {
+  if (!timeStr) return false;
+  timeStr = normalizeTimeFormat(timeStr);
+  // Match format HH:MM where HH is 00-23 and MM is 00-59
+  const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+  return timeRegex.test(timeStr);
+};
 
 const checkWorkingHours = async (forceFresh = false) => {
   try {
-    const userData = forceFresh ? 
-      await getUserData(true) : 
-      await getUserData();
-
-    if (!userData?.workingHours?.startTime || !userData?.workingHours?.endTime) {
-      return { isWithinWorkingHours: false };
+    const now = new Date();
+    
+    // Use cached result if available and not forced refresh
+    if (!forceFresh && lastWorkingHoursCheck && lastWorkingHoursCheckTime) {
+      const timeSinceLastCheck = now.getTime() - lastWorkingHoursCheckTime;
+      if (timeSinceLastCheck < WORKING_HOURS_CACHE_DURATION) {
+        return lastWorkingHoursCheck;
+      }
     }
 
-    const { startTime, endTime } = userData.workingHours;
-
-    if (!/^\d{1,2}:\d{2}$/.test(startTime) || !/^\d{1,2}:\d{2}$/.test(endTime)) {
-      return { isWithinWorkingHours: false };
+    const userData = await getUserData(forceFresh);
+    if (!userData?.workingHours) {
+      lastWorkingHoursCheck = { isWithinWorkingHours: false, reason: 'No working hours defined' };
+      lastWorkingHoursCheckTime = now.getTime();
+      return lastWorkingHoursCheck;
     }
 
-    const currentTime = new Date();
-    const currentHour = currentTime.getHours();
-    const currentMinute = currentTime.getMinutes();
+    const { startTime: rawStartTime, endTime: rawEndTime, isWorkingDay } = userData.workingHours;
+    
+    // Normalize time formats
+    const startTime = normalizeTimeFormat(rawStartTime);
+    const endTime = normalizeTimeFormat(rawEndTime);
 
+    // Check if it's a working day
+    if (!isWorkingDay) {
+      lastWorkingHoursCheck = { isWithinWorkingHours: false, reason: 'Not a working day' };
+      lastWorkingHoursCheckTime = now.getTime();
+      return lastWorkingHoursCheck;
+    }
+
+    // Validate time format
+    if (!isValidTimeFormat(startTime) || !isValidTimeFormat(endTime)) {
+      lastWorkingHoursCheck = { 
+        isWithinWorkingHours: false, 
+        reason: 'Invalid time format', 
+        details: { startTime: rawStartTime, endTime: rawEndTime }
+      };
+      lastWorkingHoursCheckTime = now.getTime();
+      if (__DEV__) {
+        console.log('[Working Hours Check] Invalid time format:', { startTime: rawStartTime, endTime: rawEndTime });
+      }
+      return lastWorkingHoursCheck;
+    }
+
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
     const [startHour, startMinute] = startTime.split(':').map(Number);
     const [endHour, endMinute] = endTime.split(':').map(Number);
     
@@ -477,52 +565,47 @@ const checkWorkingHours = async (forceFresh = false) => {
     const startMinutes = startHour * 60 + startMinute;
     let endMinutes = endHour * 60 + endMinute;
 
-    if (!userData.workingHours.isWorkingDay) {
-      lastWorkingHoursCheck = { isWorkingDay: false, isWithinWorkingHours: false };
-      return { isWithinWorkingHours: false };
-    }
-
-    let adjustedCurrentMinutes = currentMinutes;
-    if (endHour >= 24) {
-      endMinutes = (endHour - 24) * 60 + endMinute;
-      if (currentHour < 12) {
-        adjustedCurrentMinutes = currentMinutes;
-      } else {
-        endMinutes += 24 * 60;
+    // Handle overnight shifts
+    if (endHour < startHour) {
+      endMinutes += 24 * 60; // Add 24 hours
+      if (currentHour < startHour) {
+        // We're in the early hours of the next day
+        endMinutes -= 24 * 60;
       }
     }
 
-    const isWithinWorkingHours = 
-      adjustedCurrentMinutes >= startMinutes && 
-      adjustedCurrentMinutes <= endMinutes;
+    const isWithinWorkingHours = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
 
+    // Cache the result
+    lastWorkingHoursCheck = { 
+      isWithinWorkingHours,
+      reason: isWithinWorkingHours ? 'Within working hours' : 'Outside working hours',
+      currentTime: `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`,
+      workingHours: { startTime, endTime }
+    };
+    lastWorkingHoursCheckTime = now.getTime();
+
+    // Handle tracking state changes
     if (lastWorkingHoursCheck?.isWithinWorkingHours !== isWithinWorkingHours) {
       if (!isWithinWorkingHours) {
         await stopLocationTracking();
-        if (settingsRefreshInterval) {
-          clearInterval(settingsRefreshInterval);
-          settingsRefreshInterval = null;
-        }
-        if (locationCheckInterval) {
-          clearInterval(locationCheckInterval);
-          locationCheckInterval = null;
-        }
-        if (recoveryCheckInterval) {
-          clearInterval(recoveryCheckInterval);
-          recoveryCheckInterval = null;
-        }
-        if (workingHoursCheckInterval) {
-          clearInterval(workingHoursCheckInterval);
-          workingHoursCheckInterval = null;
-        }
+        // Clear all intervals
+        [settingsRefreshInterval, locationCheckInterval, recoveryCheckInterval, workingHoursCheckInterval]
+          .forEach(interval => {
+            if (interval) {
+              clearInterval(interval);
+              interval = null;
+            }
+          });
       }
     }
 
-    lastWorkingHoursCheck = { isWorkingDay: true, isWithinWorkingHours };
-    return { isWithinWorkingHours };
+    return lastWorkingHoursCheck;
   } catch (error) {
     console.error('[ERROR] Error checking working hours:', error);
-    return { isWithinWorkingHours: false };
+    lastWorkingHoursCheck = { isWithinWorkingHours: false, reason: 'Error checking working hours' };
+    lastWorkingHoursCheckTime = now.getTime();
+    return lastWorkingHoursCheck;
   }
 };
 
@@ -597,6 +680,12 @@ const updateLocationPermissionStatus = async (status) => {
 // Function to get current location permission status
 const getLocationPermissionStatus = async () => {
   try {
+    // First check if we're in working hours
+    const workingHoursCheck = await checkWorkingHours();
+    if (!workingHoursCheck.isWithinWorkingHours) {
+      return { allGranted: true }; // Pretend permissions are granted outside working hours
+    }
+
     const servicesEnabled = await Location.hasServicesEnabledAsync();
     const foregroundPermission = await Location.getForegroundPermissionsAsync();
     const backgroundPermission = await Location.getBackgroundPermissionsAsync();
@@ -651,6 +740,12 @@ const verifyLocationPermissions = async (retryCount = 0) => {
 
 const requestLocationPermissions = async () => {
   try {
+    // First check if we're in working hours
+    const workingHoursCheck = await checkWorkingHours();
+    if (!workingHoursCheck.isWithinWorkingHours) {
+      return true; // Pretend permission request succeeded outside working hours
+    }
+
     // Force request foreground permission
     const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
 
@@ -730,13 +825,15 @@ const startLocationTracking = async (isBackground = false) => {
     try {
       await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
         accuracy: Location.Accuracy.BestForNavigation,
-        timeInterval: LOCATION_UPDATE_INTERVAL,
+        timeInterval: LOCATION_UPDATE_INTERVAL, // 20 seconds
         distanceInterval: 0,
         showsBackgroundLocationIndicator: true,
+        pausesUpdatesAutomatically: false,
+        activityType: Location.ActivityType.Other,
         foregroundService: {
           notificationTitle: 'Location Tracking Active',
           notificationBody: 'Tracking your location for attendance',
-          notificationColor: '#4CAF50',
+          notificationColor: '#2196F3',
         }
       });
       
@@ -761,28 +858,48 @@ const startForcedUpdates = () => {
     clearInterval(forcedUpdateInterval);
   }
 
+  // Immediately try to get and save location
+  getAndSaveLocation().catch(error => 
+    console.error('[Location Service] Initial forced update failed:', error)
+  );
+
   forcedUpdateInterval = setInterval(async () => {
     try {
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-        maximumAge: LOCATION_UPDATE_INTERVAL / 2,
-        timeout: 10000
-      });
-
-      if (location) {
-        await saveLocationToFirebase(location).catch(async (error) => {
-          await saveLocationOffline(location);
-        });
+      // Check working hours first
+      const workingHoursCheck = await checkWorkingHours(true);
+      if (!workingHoursCheck.isWithinWorkingHours) {
+        console.log('[Location Service] Outside working hours, skipping forced update');
+        return;
       }
 
+      // Verify tracking is active
       const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
         .catch(() => false);
       
       if (!isTracking) {
+        console.log('[Location Service] Location tracking not active, restarting');
         await startLocationTracking();
       }
-    } catch (error) {}
+
+      // Get and save location
+      await getAndSaveLocation();
+
+      // Try to sync any offline locations
+      await syncOfflineLocations().catch(error => 
+        console.error('[Location Service] Failed to sync offline locations:', error)
+      );
+    } catch (error) {
+      console.error('[Location Service] Error in forced update interval:', error);
+    }
   }, LOCATION_UPDATE_INTERVAL);
+
+  // Return cleanup function
+  return () => {
+    if (forcedUpdateInterval) {
+      clearInterval(forcedUpdateInterval);
+      forcedUpdateInterval = null;
+    }
+  };
 };
 
 const handleAppStateChange = async (nextAppState) => {
@@ -1075,197 +1192,9 @@ const startPostLoginTracking = async () => {
   }
 };
 
-// Modify saveLocationToFirebase to include detailed logging
-const saveLocationToFirebase = async (location) => {
-  try {
-    console.log('[Location Service] Attempting to save location:', {
-      latitude: location.coords?.latitude || location.latitude,
-      longitude: location.coords?.longitude || location.longitude,
-      timestamp: new Date().toISOString()
-    });
-
-    const workingHoursCheck = await checkWorkingHours(true);
-    if (!workingHoursCheck.isWithinWorkingHours) {
-      console.log('[Location Service] Outside working hours, stopping tracking');
-      await stopLocationTracking();
-      if (settingsRefreshInterval) {
-        clearInterval(settingsRefreshInterval);
-        settingsRefreshInterval = null;
-      }
-      if (locationCheckInterval) {
-        clearInterval(locationCheckInterval);
-        locationCheckInterval = null;
-      }
-      if (recoveryCheckInterval) {
-        clearInterval(recoveryCheckInterval);
-        recoveryCheckInterval = null;
-      }
-      if (workingHoursCheckInterval) {
-        clearInterval(workingHoursCheckInterval);
-        workingHoursCheckInterval = null;
-      }
-      return false;
-    }
-
-    const userData = await getCachedAuthData();
-    if (!userData?.email) {
-      console.log('[Location Service] No user data found');
-      return false;
-    }
-
-    const now = new Date();
-    const locationTime = new Date(location.timestamp || Date.now());
-    const timeDiff = Math.abs(now - locationTime);
-    
-    if (timeDiff > 60000) {
-      console.log('[Location Service] Location data too old');
-      return false;
-    }
-
-    const settings = await fetchSettings();
-    if (!settings?.workingHours) {
-      console.log('[Location Service] No working hours settings found');
-      await stopLocationTracking();
-      return false;
-    }
-
-    const { startTime, endTime } = settings.workingHours;
-    const [startHour, startMinute] = startTime.split(':').map(Number);
-    const [endHour, endMinute] = endTime.split(':').map(Number);
-    
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    
-    const currentMinutes = currentHour * 60 + currentMinute;
-    const startMinutes = startHour * 60 + startMinute;
-    let endMinutes = endHour * 60 + endMinute;
-
-    if (endHour >= 24) {
-      endMinutes = (endHour - 24) * 60 + endMinute;
-      if (currentHour < 12) {
-      } else {
-        endMinutes += 24 * 60;
-      }
-    }
-
-    if (currentMinutes < startMinutes || currentMinutes > endMinutes) {
-      console.log('[Location Service] Current time outside duty hours');
-      await stopLocationTracking();
-      return false;
-    }
-
-    const deviceInfo = await getDeviceInfo();
-    const coords = location.coords || location;
-    const latitude = coords.latitude || location.latitude;
-    const longitude = coords.longitude || location.longitude;
-    
-    if (!latitude || !longitude) {
-      console.log('[Location Service] Invalid location data');
-      return false;
-    }
-    
-    const locationData = {
-      accuracy: coords.accuracy || location.accuracy || 0,
-      altitude: coords.altitude || location.altitude || 0,
-      appState: AppState.currentState,
-      createdAt: new Date().toISOString(),
-      deviceInfo: {
-        brand: deviceInfo.brand || "",
-        isDevice: deviceInfo.isDevice || true,
-        manufacturer: deviceInfo.manufacturer || "",
-        model: deviceInfo.model || "",
-        osVersion: deviceInfo.osVersion || "",
-      },
-      heading: coords.heading || location.heading || 0,
-      isBackground: AppState.currentState !== 'active',
-      lastUpdate: new Date().toISOString(),
-      latitude: latitude,
-      longitude: longitude,
-      speed: coords.speed || location.speed || 0,
-      timestamp: new Date(location.timestamp || Date.now()).toISOString(),
-      userId: userData.email.toLowerCase(),
-      userRole: userData.role || 'staff'
-    };
-
-    console.log('[Location Service] Saving location data:', locationData);
-
-    const userEmail = userData.email.toLowerCase();
-    await db.collection('locations')
-      .doc(userEmail)
-      .set({
-        currentLocation: locationData,
-        lastUpdate: new Date().toISOString(),
-        lastLocationTimestamp: new Date().getTime()
-      }, { merge: true });
-      
-    console.log('[Location Service] Location saved successfully');
-    return true;
-  } catch (error) {
-    console.error('[Location Service] Error saving location:', error);
-    await saveLocationOffline(location);
-    return false;
-  }
-};
-
-const saveLocationOffline = async (location) => {
-  try {
-    const cachedData = await getCachedAuthData();
-    if (!cachedData) return;
-
-    const offlineData = {
-      ...location,
-      userId: cachedData.email,
-      userRole: cachedData.role,
-      timestamp: new Date().toISOString(),
-      savedAt: new Date().toISOString()
-    };
-
-    // Get existing offline data
-    const existingData = await AsyncStorage.getItem(OFFLINE_LOCATIONS_KEY);
-    let offlineLocations = [];
-    
-    if (existingData) {
-      try {
-        offlineLocations = JSON.parse(existingData);
-        if (!Array.isArray(offlineLocations)) {
-          offlineLocations = [];
-        }
-      } catch (e) {
-        offlineLocations = [];
-      }
-    }
-
-    // Add new location and keep only last 100 locations
-    offlineLocations.push(offlineData);
-    if (offlineLocations.length > 100) {
-      offlineLocations = offlineLocations.slice(-100);
-    }
-
-    await AsyncStorage.setItem(OFFLINE_LOCATIONS_KEY, JSON.stringify(offlineLocations));
-  } catch (error) {
-  }
-};
-
-const syncOfflineLocations = async () => {
-  try {
-    const offlineData = await AsyncStorage.getItem(OFFLINE_LOCATIONS_KEY);
-    if (!offlineData) return;
-
-    const offlineLocations = JSON.parse(offlineData);
-    if (!Array.isArray(offlineLocations)) return;
-
-    for (const location of offlineLocations) {
-      try {
-        await saveLocationToFirebase(location);
-        // Remove synced location
-        offlineLocations.shift();
-        await AsyncStorage.setItem(OFFLINE_LOCATIONS_KEY, JSON.stringify(offlineLocations));
-      } catch (error) {
-        break; // Stop on first error to prevent data loss
-      }
-    }
-  } catch (error) {
-  }
+// Using imported saveLocationToMongo from mongoService
+const saveLocationToMongoDB = async (location) => {
+  return await saveLocationToMongo(location);
 };
 
 // Modify monitorLocationServices to handle navigation initialization
@@ -1350,8 +1279,19 @@ const monitorLocationServices = async (navigation) => {
 
 // Add function to check if location permission is required
 const isLocationPermissionRequired = async () => {
-  const status = await getLocationPermissionStatus();
-  return !status.allGranted;
+  try {
+    // First check if we're in working hours
+    const workingHoursCheck = await checkWorkingHours();
+    if (!workingHoursCheck.isWithinWorkingHours) {
+      return false; // Don't require permissions outside working hours
+    }
+
+    const permissionStatus = await getLocationPermissionStatus();
+    return !permissionStatus.allGranted;
+  } catch (error) {
+    console.error('[ERROR] Error checking location permission requirement:', error);
+    return false;
+  }
 };
 
 // Add new function to handle location permission navigation
@@ -1554,28 +1494,39 @@ const startWorkingHoursCheck = () => {
     workingHoursCheckInterval = null;
   }
 
-  workingHoursCheckInterval = setInterval(async () => {
-    try {
-      const workingHoursCheck = await checkWorkingHours(true);
+  // Do an immediate check
+  checkWorkingHours(true).then(async result => {
+    if (result.isWithinWorkingHours) {
       const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
         .catch(() => false);
+      if (!isTracking) {
+        await startLocationTracking();
+      }
+    }
+  });
+
+  // Set up the interval
+  workingHoursCheckInterval = setInterval(async () => {
+    try {
+      const result = await checkWorkingHours();
+      if (__DEV__) {
+        console.log('[Working Hours Check]', result);
+      }
       
-      if (workingHoursCheck.isWithinWorkingHours !== lastWorkingHoursState || 
-          isTracking !== lastTrackingState) {
-        
-        lastWorkingHoursState = workingHoursCheck.isWithinWorkingHours;
-        lastTrackingState = isTracking;
-        
-        if (!workingHoursCheck.isWithinWorkingHours) {
-          await stopLocationTracking();
-        } else if (!isTracking) {
-          await startLocationTracking();
-        }
+      const isTracking = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
+        .catch(() => false);
+
+      if (result.isWithinWorkingHours && !isTracking) {
+        await startLocationTracking();
+      } else if (!result.isWithinWorkingHours && isTracking) {
+        await stopLocationTracking();
       }
     } catch (error) {
-      console.error('[ERROR] Error in working hours check:', error);
+      if (__DEV__) {
+        console.error('[ERROR] Error in working hours check interval:', error);
+      }
     }
-  }, WORKING_HOURS_CHECK_INTERVAL);
+  }, LOCATION_UPDATE_INTERVAL);
 };
 
 // Start the working hours check when the module loads
