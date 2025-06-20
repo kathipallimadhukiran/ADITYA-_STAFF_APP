@@ -30,7 +30,12 @@ const rtdb = firebase.database(app);
 // Set language for auth
 auth.useDeviceLanguage();
 
+// Function to check if Firebase is initialized
+const isInitialized = () => {
+  return !!firebase.apps.length;
+};
+
 // Export getAuth function that always returns the initialized auth instance
 const getAuth = () => auth;
 
-export { firebase, getAuth, db, rtdb };
+export { firebase, getAuth, db, rtdb, isInitialized };

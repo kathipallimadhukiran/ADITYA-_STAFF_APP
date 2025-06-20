@@ -36,9 +36,8 @@ import * as Location from 'expo-location';
 import { startLocationTracking, stopLocationTracking } from "../../services/LocationService";
 import LocationPermissionScreen from "../../components/LocationPermissionScreen";
 
-const DashboardScreen = () => {
+const DashboardScreen = ({ route }) => {
   const navigation = useNavigation();
-  const route = useRoute();
   const [user, setUser] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [todayTasks, setTodayTasks] = useState([]);
@@ -58,7 +57,18 @@ const DashboardScreen = () => {
   const [lastAbsentCheck, setLastAbsentCheck] = useState(null);
   const [needsLocationPermission, setNeedsLocationPermission] = useState(false);
 
-  
+  // Get userType from route params
+  const userType = route?.params?.userType?.toLowerCase() || 'student';
+
+  // Debug log for initialization
+  useEffect(() => {
+    console.log('[DEBUG] DashboardScreen initialized:', {
+      userType,
+      routeParams: route?.params,
+      currentUser: currentUser?.email
+    });
+  }, [userType, route?.params, currentUser?.email]);
+
   const staffQuickActions = [
     { id: "1", label: "Mark Attendance", icon: "clipboard-check", bgColor: "#FF9F1C", route: "MarkAttendance" },
     { 
@@ -162,14 +172,24 @@ const DashboardScreen = () => {
         const userData = await fetchUser(currentUser.email);
         if (userData) {
           const isUserSuperAdmin = userData.email === 'kathipallimadhu@gmail.com' || userData.accessLevel === 'Super Admin';
+          const userRole = userType || userData.role || 'student';
+          
           setUser({
             ...userData,
-            accessLevel: isUserSuperAdmin ? 'Super Admin' : (userData.accessLevel || userData.role || 'student')
+            role: userRole,
+            accessLevel: isUserSuperAdmin ? 'Super Admin' : (userData.accessLevel || userRole)
+          });
+
+          // Debug log for user data
+          console.log('[DEBUG] User data loaded:', {
+            email: userData.email,
+            role: userRole,
+            accessLevel: isUserSuperAdmin ? 'Super Admin' : (userData.accessLevel || userRole)
           });
         }
 
         // Load attendance data if needed
-        if (userData?.role === 'staff' || userData?.role === 'admin' || userData?.accessLevel?.includes('admin')) {
+        if (userType === 'staff' || userType === 'admin' || userType === 'faculty') {
           await loadAttendanceData();
         }
 
@@ -180,7 +200,7 @@ const DashboardScreen = () => {
     };
 
     initializeData();
-  }, [currentUser?.email]);
+  }, [currentUser?.email, userType]);
 
   // Tasks subscription effect - only start after user data is loaded
   useEffect(() => {
@@ -645,19 +665,22 @@ const DashboardScreen = () => {
 
   // Update the quick actions section
   const getQuickActions = () => {
-    const userRole = user?.role?.toLowerCase() || '';
-    const userAccess = user?.accessLevel?.toLowerCase() || '';
-    const isSuperAdmin = userAccess.includes('super admin') || user?.email === 'kathipallimadhu@gmail.com';
+    // Debug log for quick actions
+    console.log('[DEBUG] Getting quick actions for:', {
+      userType,
+      userRole: user?.role,
+      accessLevel: user?.accessLevel
+    });
 
-    if (userAccess.includes('admin') || userRole === 'admin' || userRole.includes('admin')) {
-      return adminQuickActions.filter(action => !action.superAdminOnly || isSuperAdmin);
-    } else if (userRole === 'staff') {
-      return staffQuickActions;
-    } 
-    else if (userRole === 'faculty'){
-      return staffQuickActions;
-    }else {
-      return studentQuickActions;
+    switch (userType) {
+      case 'admin':
+        return adminQuickActions;
+      case 'staff':
+      case 'faculty':
+        return staffQuickActions;
+      case 'student':
+      default:
+        return studentQuickActions;
     }
   };
 

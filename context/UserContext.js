@@ -16,20 +16,28 @@ export const UserProvider = ({ children }) => {
 
   const restoreSession = async () => {
     try {
-      const [userData, isLoggedIn] = await Promise.all([
+      const [userData, isLoggedIn, emailCredential, passwordCredential] = await Promise.all([
         AsyncStorage.getItem('@user_data'),
-        AsyncStorage.getItem('@is_logged_in')
+        AsyncStorage.getItem('@is_logged_in'),
+        AsyncStorage.getItem('@user_email'),
+        AsyncStorage.getItem('@user_password')
       ]);
 
       if (userData && isLoggedIn === 'true') {
         const parsedUserData = JSON.parse(userData);
         console.log('[DEBUG] Found stored user data:', parsedUserData.email);
-        return parsedUserData;
+        return {
+          userData: parsedUserData,
+          credentials: emailCredential && passwordCredential ? {
+            email: emailCredential,
+            password: passwordCredential
+          } : null
+        };
       }
-      return null;
+      return { userData: null, credentials: null };
     } catch (error) {
       console.error('[DEBUG] Error restoring session:', error);
-      return null;
+      return { userData: null, credentials: null };
     }
   };
 
@@ -42,7 +50,7 @@ export const UserProvider = ({ children }) => {
       const currentUser = firebase.auth().currentUser;
       
       // Then try to restore the session from storage
-      const storedUser = await restoreSession();
+      const { userData: storedUser, credentials } = await restoreSession();
 
       if (currentUser) {
         // If Firebase session exists, verify against stored data
@@ -69,34 +77,39 @@ export const UserProvider = ({ children }) => {
             setUser(freshUserData);
           }
         }
-      } else if (storedUser && retryCount < MAX_RETRIES) {
-        // If no Firebase session but we have stored user data, try to restore
-        console.log('[DEBUG] UserContext: Attempting to restore session');
+      } else if (storedUser && credentials && retryCount < MAX_RETRIES) {
+        // If no Firebase session but we have stored user data and credentials, try to restore
+        console.log('[DEBUG] UserContext: Attempting to restore session with stored credentials');
         try {
-          const emailCredential = await AsyncStorage.getItem('@user_email');
-          const passwordCredential = await AsyncStorage.getItem('@user_password');
+          const userCredential = await firebase.auth().signInWithEmailAndPassword(
+            credentials.email,
+            credentials.password
+          );
           
-          if (emailCredential && passwordCredential) {
-            await firebase.auth().signInWithEmailAndPassword(emailCredential, passwordCredential);
+          if (userCredential.user.emailVerified) {
             setUser(storedUser);
           } else {
-            throw new Error('No stored credentials');
+            throw new Error('Email not verified');
           }
         } catch (error) {
-          console.log('[DEBUG] UserContext: Failed to restore session, retrying...');
-          setRetryCount(prev => prev + 1);
-          setTimeout(initializeUser, 1000); // Retry after 1 second
+          console.log('[DEBUG] UserContext: Failed to restore session:', error.message);
+          if (retryCount < MAX_RETRIES - 1) {
+            setRetryCount(prev => prev + 1);
+            setTimeout(initializeUser, 1000); // Retry after 1 second
+          } else {
+            console.log('[DEBUG] UserContext: Max retries reached, clearing state');
+            await clearAuthState();
+            setUser(null);
+          }
         }
-      } else if (retryCount >= MAX_RETRIES) {
-        console.log('[DEBUG] UserContext: Max retries reached, clearing state');
-        await clearAuthState();
-        setUser(null);
       } else {
-        console.log('[DEBUG] UserContext: No user data found');
+        console.log('[DEBUG] UserContext: No valid session to restore');
+        await clearAuthState();
         setUser(null);
       }
     } catch (error) {
       console.error('[DEBUG] UserContext: Error initializing user:', error);
+      await clearAuthState();
       setUser(null);
     } finally {
       setIsLoading(false);
@@ -110,9 +123,16 @@ export const UserProvider = ({ children }) => {
     const unsubscribe = firebase.auth().onAuthStateChanged(async (firebaseUser) => {
       if (firebaseUser) {
         console.log('[DEBUG] Firebase auth state changed:', firebaseUser.email);
-        initializeUser();
+        if (firebaseUser.emailVerified) {
+          initializeUser();
+        } else {
+          console.log('[DEBUG] Firebase user email not verified');
+          await clearAuthState();
+          setUser(null);
+        }
       } else {
         console.log('[DEBUG] Firebase auth state: signed out');
+        await clearAuthState();
         setUser(null);
       }
     });

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, forwardRef } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import LoginScreen from '../screens/Auth/LoginScreen';
 import SignupScreen from '../screens/Auth/SignupScreen';
@@ -144,14 +144,17 @@ const authScreens = [
   }
 ];
 
-
 // Role-specific screens
 const roleSpecificScreens = {
   student: [
     {
       name: "StudentDashboard",
       component: DashboardScreen,
-      options: { headerShown: false }
+      initialParams: { userType: 'student' },
+      options: { 
+        headerShown: false,
+        title: 'Student Dashboard'
+      }
     },
     {
       name: "Results",
@@ -163,21 +166,33 @@ const roleSpecificScreens = {
     {
       name: "FacultyDashboard",
       component: DashboardScreen,
-      options: { headerShown: false }
+      initialParams: { userType: 'faculty' },
+      options: { 
+        headerShown: false,
+        title: 'Faculty Dashboard'
+      }
     }
   ],
   staff: [
     {
       name: "StaffDashboard",
       component: DashboardScreen,
-      options: { headerShown: false }
+      initialParams: { userType: 'staff' },
+      options: { 
+        headerShown: false,
+        title: 'Staff Dashboard'
+      }
     }
   ],
   admin: [
     {
       name: "AdminDashboard",
       component: DashboardScreen,
-      options: { headerShown: false }
+      initialParams: { userType: 'admin' },
+      options: { 
+        headerShown: false,
+        title: 'Admin Dashboard'
+      }
     }
   ]
 };
@@ -215,121 +230,74 @@ const debugNavigation = (screens, initialRoute, userRole) => {
   return true;
 };
 
-export default function AppNavigator({ isLoggedIn, userRole, shouldNavigateToLogin }) {
-  const { screens, initialRoute } = useMemo(() => {
-    const getScreens = () => {
-      // Always include auth screens and role-specific screens
-      const baseScreens = [...authScreens, faceCaptureScreen];
-      
-      if (!isLoggedIn || shouldNavigateToLogin) {
-        return baseScreens;
-      }
+const AppNavigator = forwardRef(({ isLoggedIn, userRole, shouldNavigateToLogin, initialRoute }, ref) => {
+  const getScreens = () => {
+    const role = validateRole(userRole);
+    
+    // Map faculty role to staff screens
+    const effectiveRole = role === 'faculty' ? 'staff' : role;
+    
+    // Get role-specific screens
+    const roleScreens = roleSpecificScreens[effectiveRole] || roleSpecificScreens[DEFAULT_ROLE];
 
-      // Get role-specific screens
-      const roleScreens = roleSpecificScreens[userRole?.toLowerCase()] || [];
-      
-      // Include screens for all roles to allow navigation between roles if needed
-      const allRoleScreens = Object.values(roleSpecificScreens).flat();
-      
-      // Combine screens ensuring no duplicates
-      const allScreens = [...baseScreens, ...allRoleScreens, ...commonScreens];
-      return allScreens.filter(
-        (screen, index, self) => index === self.findIndex((s) => s.name === screen.name)
-      );
-    };
+    // Debug log for screen registration
+    console.log('[DEBUG] Registering screens:', {
+      originalRole: role,
+      effectiveRole,
+      roleSpecificScreens: roleScreens.map(s => s.name),
+      commonScreens: commonScreens.map(s => s.name),
+      authScreens: authScreens.map(s => s.name),
+      initialRoute
+    });
 
-    const getInitialRoute = () => {
-      if (!isLoggedIn || shouldNavigateToLogin) return 'Login';
-      const validRole = validateRole(userRole);
-      return `${validRole.charAt(0).toUpperCase() + validRole.slice(1)}Dashboard`;
-    };
-
+    // Return all available screens for the Stack Navigator
     return {
-      screens: getScreens(),
-      initialRoute: getInitialRoute()
+      screens: [
+        ...authScreens,
+        ...Object.values(roleSpecificScreens).flat(), // Include all role-specific screens
+        ...commonScreens,
+        faceCaptureScreen
+      ],
+      initialRoute: initialRoute || (isLoggedIn ? `${effectiveRole.charAt(0).toUpperCase() + effectiveRole.slice(1)}Dashboard` : 'Login')
     };
-  }, [isLoggedIn, userRole, shouldNavigateToLogin]);
+  };
+
+  const { screens, initialRoute: actualInitialRoute } = getScreens();
 
   // Validate navigation setup
-  if (!debugNavigation(screens, initialRoute, userRole)) {
-    const fallbackRoute = isLoggedIn && !shouldNavigateToLogin ? 'Profile' : 'Login';
-    console.warn(`[NAVIGATION WARNING] Falling back to ${fallbackRoute} due to invalid initial route for role: ${userRole}`);
-  }
+  const screenNames = screens.map(s => s.name);
+  console.log('[DEBUG] Navigation setup:', {
+    availableRoutes: screenNames,
+    initialRoute: actualInitialRoute,
+    userRole,
+    isLoggedIn
+  });
 
-  
-
+  // Create the Stack Navigator
   return (
-    <Stack.Navigator 
-      initialRouteName={initialRoute}
-      screenOptions={{ 
-        headerShown: false,
-        animation: 'none',
-        animationEnabled: false,
-        detachInactiveScreens: true,
-        freezeOnBlur: true
+    <Stack.Navigator
+      initialRouteName={actualInitialRoute}
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: '#1D3557',
+        },
+        headerTintColor: '#fff',
+        headerTitleStyle: {
+          fontWeight: 'bold',
+        },
       }}
     >
-      {/* Auth Screens */}
-      {authScreens.map(screen => (
+      {screens.map((screen) => (
         <Stack.Screen
           key={screen.name}
           name={screen.name}
           component={screen.component}
-          options={{
-            ...screen.options,
-            animationEnabled: false
-          }}
+          options={screen.options}
           initialParams={screen.initialParams}
         />
       ))}
-
-      {/* Role-specific Screens */}
-      {Object.entries(roleSpecificScreens).map(([role, roleScreens]) => (
-        roleScreens.map(screen => (
-          <Stack.Screen
-            key={screen.name}
-            name={screen.name}
-            component={screen.component}
-            options={{
-              ...screen.options,
-              animationEnabled: false
-            }}
-          />
-        ))
-      ))}
-
-      {/* Common Screens */}
-      {commonScreens.map(screen => (
-        <Stack.Screen
-          key={screen.name}
-          name={screen.name}
-          component={screen.component}
-          options={{
-            ...screen.options,
-            animationEnabled: false
-          }}
-        />
-      ))}
-
-      {/* Face Capture Screen */}
-      <Stack.Screen
-        name={faceCaptureScreen.name}
-        component={faceCaptureScreen.component}
-        options={{
-          ...faceCaptureScreen.options,
-          animationEnabled: false
-        }}
-      />
-
-      {/* Edit Schedule Page */}
-      <Stack.Screen 
-        name="EditSchedulePage" 
-        component={EditSchedulePage}
-        options={{ 
-          headerShown: false,
-          animationEnabled: false
-        }}
-      />
     </Stack.Navigator>
   );
-}
+});
+
+export default AppNavigator;

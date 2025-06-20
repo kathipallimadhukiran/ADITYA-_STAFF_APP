@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { View, LogBox, Platform, ActivityIndicator, StatusBar, Text, AppState } from 'react-native';
+import { NavigationContainer, CommonActions } from '@react-navigation/native';
+import { View, LogBox, Platform, ActivityIndicator, StatusBar, Text } from 'react-native';
 import * as Location from 'expo-location';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './navigation/AppNavigator';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserProvider, useUser } from './context/UserContext';
+import { AuthProvider } from './context/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
 import { enableScreens } from 'react-native-screens';
@@ -16,6 +17,9 @@ import { startLocationTracking } from './services/LocationService';
 
 // Enable native screens
 enableScreens();
+
+// Add global navigation reference
+global.navigationRef = React.createRef();
 
 // Define custom theme
 const theme = {
@@ -36,6 +40,21 @@ const theme = {
   roundness: 8,
 };
 
+// Define linking configuration
+const linking = {
+  prefixes: ['aditya-app://'],
+  config: {
+    screens: {
+      FacultyDashboard: 'faculty-dashboard',
+      StudentDashboard: 'student-dashboard',
+      StaffDashboard: 'staff-dashboard',
+      AdminDashboard: 'admin-dashboard',
+      Login: 'login',
+      // Add other screens as needed
+    },
+  },
+};
+
 LogBox.ignoreLogs([
   'AsyncStorage has been extracted from react-native core',
   'Sending...',
@@ -46,117 +65,53 @@ LogBox.ignoreLogs([
 function AppContent() {
   const { user, isLoading } = useUser();
   const [needsLocationPermission, setNeedsLocationPermission] = useState(false);
-  const [isCheckingPermissions, setIsCheckingPermissions] = useState(true);
-  const permissionCheckInterval = useRef(null);
-  const appStateSubscription = useRef(null);
-  const lastPermissionCheck = useRef(Date.now());
-  const previousScreenRef = useRef(null);
-  const navigationRef = useRef(null);
-  const PERMISSION_CHECK_DEBOUNCE = 1000; // 1 second debounce
 
-  const checkLocationPermission = async (force = false) => {
-    try {
-      // Debounce check unless forced
-      const now = Date.now();
-      if (!force && now - lastPermissionCheck.current < PERMISSION_CHECK_DEBOUNCE) {
-        return;
+  const navigationState = useMemo(() => {
+    const isLoggedIn = !!user?.email;
+    const userRole = (user?.role || 'student').toLowerCase();
+    const shouldNavigateToLogin = !user?.email;
+    
+    // Map faculty role to StaffDashboard
+    let initialRoute;
+    if (isLoggedIn) {
+      if (userRole === 'faculty') {
+        initialRoute = 'StaffDashboard';
+      } else {
+        initialRoute = `${userRole.charAt(0).toUpperCase() + userRole.slice(1)}Dashboard`;
       }
-      lastPermissionCheck.current = now;
-
-      if (!user?.email || !['staff', 'admin'].includes(user?.role?.toLowerCase())) {
-        setIsCheckingPermissions(false);
-        setNeedsLocationPermission(false);
-        return;
-      }
-
-      const foreground = await Location.getForegroundPermissionsAsync();
-      const background = await Location.getBackgroundPermissionsAsync();
-      const services = await Location.hasServicesEnabledAsync();
-
-      const needsPermission = !foreground.granted || !background.granted || !services;
-      
-      if (needsPermission && !needsLocationPermission) {
-        const currentRoute = navigationRef.current?.getCurrentRoute();
-        if (currentRoute) {
-          previousScreenRef.current = {
-            name: currentRoute.name,
-            params: currentRoute.params
-          };
-        }
-        setNeedsLocationPermission(true);
-      } else if (!needsPermission) {
-        setNeedsLocationPermission(false);
-        await AsyncStorage.setItem('userEmail', user.email.toLowerCase());
-        await startLocationTracking(true);
-      }
-    } catch (error) {
-      setNeedsLocationPermission(true);
-    } finally {
-      setIsCheckingPermissions(false);
-    }
-  };
-
-  useEffect(() => {
-    if (user?.email && ['staff', 'admin'].includes(user?.role?.toLowerCase())) {
-      checkLocationPermission(true);
-
-      permissionCheckInterval.current = setInterval(() => {
-        checkLocationPermission();
-      }, 1000);
-
-      appStateSubscription.current = AppState.addEventListener('change', (nextAppState) => {
-        if (nextAppState === 'active') {
-          checkLocationPermission(true);
-        }
-      });
+    } else {
+      initialRoute = 'Login';
     }
 
-    return () => {
-      if (permissionCheckInterval.current) {
-        clearInterval(permissionCheckInterval.current);
-      }
-      if (appStateSubscription.current?.remove) {
-        appStateSubscription.current.remove();
-      }
+    console.log('[DEBUG] AppContent navigation state:', {
+      isLoggedIn,
+      userRole,
+      shouldNavigateToLogin,
+      initialRoute,
+      userEmail: user?.email,
+      userRoleRaw: user?.role
+    });
+
+    return {
+      isLoggedIn,
+      userRole,
+      shouldNavigateToLogin,
+      initialRoute
     };
   }, [user?.email, user?.role]);
 
-  const handleLocationPermissionGranted = async () => {
-    try {
-      setNeedsLocationPermission(false);
-      if (user?.email && ['staff', 'admin'].includes(user?.role?.toLowerCase())) {
-        await AsyncStorage.setItem('userEmail', user.email.toLowerCase());
-        await startLocationTracking(true);
-
-        if (previousScreenRef.current && navigationRef.current) {
-          const { name, params } = previousScreenRef.current;
-          navigationRef.current.navigate(name, params);
-          previousScreenRef.current = null;
-        }
-      }
-    } catch (error) {
-      // Handle error silently
-    }
-  };
-
-  const navigationState = useMemo(() => ({
-    isLoggedIn: !!user?.email,
-    userRole: user?.role?.toLowerCase(),
-    shouldNavigateToLogin: !user?.email
-  }), [user?.email, user?.role]);
-
-  if (isLoading || isCheckingPermissions) {
+  if (isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background }}>
         <ActivityIndicator size="large" color={theme.colors.primary} />
         <Text style={{ marginTop: 10, color: theme.colors.primary }}>
-          {isLoading ? 'Loading user data...' : 'Preparing app...'}
+          Loading user data...
         </Text>
       </View>
     );
   }
 
-  if (needsLocationPermission && ['staff', 'admin'].includes(user?.role?.toLowerCase())) {
+  if (user?.email && ['staff', 'admin'].includes(user?.role?.toLowerCase()) && needsLocationPermission) {
     return <LocationPermissionScreen onPermissionGranted={handleLocationPermissionGranted} />;
   }
 
@@ -164,17 +119,39 @@ function AppContent() {
 }
 
 export default function App() {
-  const navigationRef = useRef(null);
-  const [navigationReady, setNavigationReady] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const routeNameRef = useRef(null);
 
-  const handleNavigationReady = () => {
-    setNavigationReady(true);
-  };
+  useEffect(() => {
+    const loadInitialState = async () => {
+      try {
+        const user = await AsyncStorage.getItem('@user_data');
+        if (user) {
+          const userData = JSON.parse(user);
+          console.log('[DEBUG] Auto-login data loaded:', userData);
+        }
+      } catch (error) {
+        console.error('[NAVIGATION] Auto-login error:', error);
+      } finally {
+        setIsReady(true);
+      }
+    };
 
-  const handleNavigationStateChange = () => {
-    const appContent = navigationRef.current?.getCurrentRoute()?.params?.appContent;
-    if (appContent?.checkLocationPermission) {
-      appContent.checkLocationPermission(true);
+    loadInitialState();
+  }, []);
+
+  const onStateChange = async () => {
+    const currentRoute = global.navigationRef.current?.getCurrentRoute();
+    const previousRouteName = routeNameRef.current;
+    const currentRouteName = currentRoute?.name;
+
+    if (previousRouteName !== currentRouteName) {
+      routeNameRef.current = currentRouteName;
+      console.log('[DEBUG] Navigation route changed:', {
+        from: previousRouteName,
+        to: currentRouteName,
+        params: currentRoute?.params
+      });
     }
   };
 
@@ -184,15 +161,43 @@ export default function App() {
       <SafeAreaProvider>
         <PaperProvider theme={theme}>
           <ErrorBoundary>
-            <UserProvider>
-              <NavigationContainer 
-                ref={navigationRef}
-                onReady={handleNavigationReady}
-                onStateChange={handleNavigationStateChange}
-              >
-                {navigationReady ? <AppContent /> : null}
-              </NavigationContainer>
-            </UserProvider>
+            <AuthProvider>
+              <UserProvider>
+                <NavigationContainer
+                  ref={global.navigationRef}
+                  linking={linking}
+                  onStateChange={onStateChange}
+                  onReady={() => {
+                    routeNameRef.current = global.navigationRef.current?.getCurrentRoute()?.name;
+                    console.log('[DEBUG] Navigation container ready');
+                    
+                    // Handle any pending navigation
+                    if (global.pendingNavigation) {
+                      const { route, action } = global.pendingNavigation;
+                      if (action === 'reset') {
+                        global.navigationRef.current?.dispatch(
+                          CommonActions.reset({
+                            index: 0,
+                            routes: [{ name: route }],
+                          })
+                        );
+                      }
+                      global.pendingNavigation = null;
+                    }
+                  }}
+                  fallback={
+                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                      <ActivityIndicator size="large" color={theme.colors.primary} />
+                      <Text style={{ marginTop: 10, color: theme.colors.primary }}>
+                        Initializing navigation...
+                      </Text>
+                    </View>
+                  }
+                >
+                  {isReady ? <AppContent /> : null}
+                </NavigationContainer>
+              </UserProvider>
+            </AuthProvider>
           </ErrorBoundary>
         </PaperProvider>
       </SafeAreaProvider>

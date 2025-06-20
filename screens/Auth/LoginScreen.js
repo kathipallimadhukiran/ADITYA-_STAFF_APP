@@ -1,22 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, ScrollView, Alert, Modal, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { firebase } from '../../services/Firebase/firebaseConfig';
+import { firebase, getAuth, db, isInitialized } from '../../services/Firebase/firebaseConfig';
 import { fetchUser, isEmailAuthorized, updateUserLastLogin, checkAdminVerificationStatus } from '../../services/Firebase/firestoreService';
-import { setAuthState } from '../../services/Firebase/authUtils';
+import { setAuthState, clearAuthState } from '../../services/Firebase/authUtils';
 import { ActivityIndicator } from 'react-native';
-import { clearAuthState } from '../../services/Firebase/authUtils';
 import { useUser } from '../../context/UserContext';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, CommonActions } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Dimensions, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../services/Firebase/firebaseConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../../context/AuthContext';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { getUserData } from '../../services/Firebase/firestoreService';
 
-const LoginScreen = () => {
-  const { setUser } = useUser();
+// Helper function to get dashboard screen name
+const getDashboardScreen = (role) => {
+  if (!role) return 'StudentDashboard';
+  
+  const normalizedRole = role.toLowerCase().trim();
+  
+  // Map faculty role to StaffDashboard
+  if (normalizedRole === 'faculty') {
+    console.log('[DEBUG] Faculty user, redirecting to StaffDashboard');
+    return 'StaffDashboard';
+  }
+  
+  const validRoles = ['student', 'staff', 'admin'];
+  
+  if (!validRoles.includes(normalizedRole)) {
+    console.error(`[NAVIGATION ERROR] Invalid role: ${role}`);
+    return 'StudentDashboard';
+  }
+  
+  const dashboardName = `${normalizedRole.charAt(0).toUpperCase() + normalizedRole.slice(1)}Dashboard`;
+  console.log('[DEBUG] Navigating to dashboard:', dashboardName);
+  return dashboardName;
+};
+
+const LoginScreen = ({ navigation }) => {
+  const { login } = useAuth();
+  const { user, setUser } = useUser();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -24,16 +50,120 @@ const LoginScreen = () => {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const navigation = useNavigation();
   const [loading, setLoading] = useState(false);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState('');
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
   const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  useEffect(() => {
+    checkAutoLogin();
+  }, []);
+
+  const checkAutoLogin = async () => {
+    try {
+      setIsInitializing(true);
+      
+      // Check if user data exists
+      const storedUserData = await AsyncStorage.getItem('@user_data');
+      const storedEmail = await AsyncStorage.getItem('@user_email');
+      const storedPassword = await AsyncStorage.getItem('@user_password');
+
+      if (storedUserData && storedEmail && storedPassword) {
+        // Attempt to restore Firebase session
+        try {
+          const userCredential = await firebase.auth().signInWithEmailAndPassword(storedEmail, storedPassword);
+          const userData = JSON.parse(storedUserData);
+          
+          if (userCredential.user.emailVerified) {
+            // Update user context
+            await login(userData);
+            
+            // Get the appropriate dashboard screen
+            const dashboardScreen = getDashboardScreen(userData.role);
+
+            // Debug log before navigation
+            console.log('[DEBUG] Auto-login successful:', {
+              email: userData.email,
+              role: userData.role,
+              navigatingTo: dashboardScreen
+            });
+
+            // Navigate to appropriate dashboard
+            navigation.reset({
+              index: 0,
+              routes: [{ name: dashboardScreen }],
+            });
+            return;
+          }
+        } catch (error) {
+          console.error('[AUTO-LOGIN ERROR]:', error);
+          // Clear stored credentials if auto-login fails
+          await clearAuthState();
+        }
+      }
+    } catch (error) {
+      console.error('Error during auto-login check:', error);
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  useEffect(() => {
+    // Check Firebase initialization
+    if (!isInitialized()) {
+      Alert.alert(
+        'Error',
+        'Firebase services are not initialized. Please restart the app.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    // Clear any existing auth state on mount
+    const clearExistingAuth = async () => {
+      try {
+        await clearAuthState();
+        setUser(null);
+        // Let the navigation be handled by the AuthContext
+      } catch (error) {
+        console.error('Error clearing auth state:', error);
+      }
+    };
+
+    clearExistingAuth();
+  }, [setUser]);
+
+  useEffect(() => {
+    // If user is already authenticated, navigate to appropriate dashboard
+    if (user) {
+      const dashboardScreen = getDashboardScreen(user.role);
+      
+      // Debug log before navigation
+      console.log('[DEBUG] User state change navigation:', {
+        email: user.email,
+        role: user.role,
+        navigatingTo: dashboardScreen
+      });
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: dashboardScreen }],
+      });
+    }
+  }, [user, navigation]);
 
   const registerAndSavePushToken = async (email) => {
     try {
+      // Check if running on a physical device
+      const isPhysicalDevice = Platform.OS !== 'web' && !__DEV__;
+      if (!isPhysicalDevice) {
+        console.log('Push notifications are only available on physical devices');
+        return null;
+      }
+
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
   
@@ -47,8 +177,14 @@ const LoginScreen = () => {
         return null;
       }
   
-      const tokenData = await Notifications.getExpoPushTokenAsync();
+      const tokenData = await Notifications.getExpoPushTokenAsync({
+        projectId: require('../../app.json').expo.extra.eas.projectId
+      });
       const expoPushToken = tokenData.data;
+  
+      if (!db) {
+        throw new Error('Firestore is not initialized');
+      }
   
       // Save the token to the user's document with lowercase email
       const lowerEmail = email.toLowerCase().trim();
@@ -62,108 +198,133 @@ const LoginScreen = () => {
       return expoPushToken;
     } catch (error) {
       console.error('Error saving push token:', error);
+      // Don't throw the error - just return null as this is not critical for login
       return null;
     }
   };
 
   const handleLogin = async () => {
-    // Reset previous errors
-    setEmailError('');
-    setPasswordError('');
-    setMessage('');
-    setMessageType('');
-
-    // Validate inputs
-    if (!email.trim() && !password.trim()) {
-      setEmailError('Email is required');
-      setPasswordError('Password is required');
-      return;
-    }
-    if (!email.trim()) {
-      setEmailError('Email is required');
-      return;
-    }
-    if (!password.trim()) {
-      setPasswordError('Password is required');
-      return;
-    }
-
-    setLoading(true);
     try {
-      // Sign in with Firebase Auth
+      setLoading(true);
+      setMessage('');
+
+      // Validate email and password
+      if (!email || !password) {
+        setMessage('Please enter both email and password');
+        setMessageType('error');
+        return;
+      }
+
+      // Sign in with Firebase
       const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
       
-      // Check if email is verified
       if (!userCredential.user.emailVerified) {
-        await firebase.auth().signOut();
-        setMessageType('error');
         setVerificationEmail(email);
         setShowVerificationModal(true);
-        setLoading(false);
-        return;
-      }
-
-      // Fetch additional user data from Firestore
-      const userData = await fetchUser(email);
-      if (!userData) {
-        setMessageType('error');
-        setMessage('Your account exists but profile data is missing. Please contact support.');
-        setLoading(false);
-        return;
-      }
-
-      // Check if the email is authorized for the role
-      const isAuthorized = await isEmailAuthorized(email, userData.role);
-      if (!isAuthorized) {
         await firebase.auth().signOut();
-        setMessageType('error');
-        setMessage(`This email is not authorized for ${userData.role} access. Please contact your administrator.`);
-        setLoading(false);
         return;
       }
 
-      // Store credentials securely for session restoration
-      await AsyncStorage.setItem('@user_email', email);
-      await AsyncStorage.setItem('@user_password', password);
-      
-      // Store user data
-      await AsyncStorage.setItem('@user_data', JSON.stringify(userData));
-      await AsyncStorage.setItem('@is_logged_in', 'true');
+      // Get user data from Firestore
+      const userDoc = await firebase.firestore()
+        .collection('users')
+        .doc(email.toLowerCase())
+        .get();
 
-      // Update last login in Firestore
-      await updateUserLastLogin(email);
+      if (!userDoc.exists) {
+        setMessage('User data not found');
+        setMessageType('error');
+        return;
+      }
 
-      // Register and save push notification token
-      await registerAndSavePushToken(email);
+      const userData = {
+        ...userDoc.data(),
+        uid: userCredential.user.uid,
+        email: email.toLowerCase(),
+        emailVerified: userCredential.user.emailVerified
+      };
+
+      // Validate user role
+      if (!userData.role) {
+        console.error('[AUTH ERROR] User role not found:', userData);
+        setMessage('User role not found. Please contact support.');
+        setMessageType('error');
+        return;
+      }
+
+      // Always store credentials for auto-login
+      await Promise.all([
+        AsyncStorage.setItem('@user_email', email.toLowerCase()),
+        AsyncStorage.setItem('@user_password', password),
+        AsyncStorage.setItem('@user_data', JSON.stringify(userData)),
+        AsyncStorage.setItem('@is_logged_in', 'true')
+      ]);
 
       // Update user context
-      setUser(userData);
+      await login(userData);
       
+      // Register push token
+      await registerAndSavePushToken(email);
+
+      // Get the appropriate dashboard screen
+      const dashboardScreen = getDashboardScreen(userData.role);
+
+      // Debug log before navigation
+      console.log('[DEBUG] Login successful:', {
+        email: userData.email,
+        role: userData.role,
+        navigatingTo: dashboardScreen
+      });
+
       // Navigate to appropriate dashboard
-      const role = userData.role.toLowerCase();
       navigation.reset({
         index: 0,
-        routes: [{ name: `${role.charAt(0).toUpperCase() + role.slice(1)}Dashboard` }],
+        routes: [{ name: dashboardScreen }],
       });
 
     } catch (error) {
-      console.error('Login error:', error);
-      setMessageType('error');
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-        setMessage('Invalid email or password');
-      } else {
-        setMessage('An error occurred during login. Please try again.');
+      console.error('[LOGIN ERROR]:', error);
+      let errorMessage = 'An error occurred during login. Please try again.';
+      
+      // Handle specific Firebase auth errors
+      switch (error.code) {
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email address format.';
+          break;
+        case 'auth/user-disabled':
+          errorMessage = 'This account has been disabled. Please contact support.';
+          break;
+        case 'auth/user-not-found':
+          errorMessage = 'No account found with this email.';
+          break;
+        case 'auth/wrong-password':
+          errorMessage = 'Incorrect password.';
+          break;
+        case 'auth/too-many-requests':
+          errorMessage = 'Too many failed login attempts. Please try again later.';
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = 'Network error. Please check your internet connection.';
+          break;
       }
+      
+      setMessage(errorMessage);
+      setMessageType('error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleResendVerification = async () => {
+    if (!auth) {
+      Alert.alert('Error', 'Authentication service is not available');
+      return;
+    }
+
     try {
       setLoading(true);
-      const user = await firebase.auth().signInWithEmailAndPassword(verificationEmail, password);
-      await user.user.sendEmailVerification();
+      const userCredential = await signInWithEmailAndPassword(auth, verificationEmail, password);
+      await userCredential.user.sendEmailVerification();
       setMessage('Verification email sent! Please check your inbox.');
       setMessageType('success');
       setShowVerificationModal(false);
@@ -176,19 +337,12 @@ const LoginScreen = () => {
     }
   };
 
-  const getDashboardScreen = (role) => {
-    switch (role?.toLowerCase()) {
-      case 'admin':
-        return 'AdminDashboard';
-      case 'staff':
-      case 'faculty':
-        return 'StaffDashboard';
-      default:
-        return 'StudentDashboard';
-    }
-  };
-
   const handleForgotPassword = async () => {
+    if (!auth) {
+      Alert.alert('Error', 'Authentication service is not available');
+      return;
+    }
+
     if (!email) {
       setForgotPasswordEmail('');
       setShowForgotPasswordModal(true);
@@ -205,9 +359,14 @@ const LoginScreen = () => {
       return;
     }
 
+    if (!auth) {
+      Alert.alert('Error', 'Authentication service is not available');
+      return;
+    }
+
     try {
       setLoading(true);
-      await firebase.auth().sendPasswordResetEmail(forgotPasswordEmail);
+      await auth.sendPasswordResetEmail(forgotPasswordEmail);
       setForgotPasswordSuccess(true);
     } catch (error) {
       let errorMessage = 'Failed to send password reset email';
@@ -359,6 +518,14 @@ const LoginScreen = () => {
     </Modal>
   );
 
+  if (isInitializing) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#f97316" />
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -394,32 +561,24 @@ const LoginScreen = () => {
             {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
           </View>
 
-          <View style={styles.inputContainer}>
-            <View style={[styles.passwordWrapper, passwordError && styles.inputError]}>
-              <TextInput
-                placeholder="Password"
-                value={password}
-                onChangeText={(text) => {
-                  setPassword(text);
-                  setPasswordError(''); // Clear error when user types
-                }}
-                secureTextEntry={!showPassword}
-                style={styles.passwordInput}
-                placeholderTextColor="#a1a1aa"
+          <View style={styles.passwordContainer}>
+            <TextInput
+              style={[styles.input, styles.passwordInput]}
+              placeholder="Password"
+              secureTextEntry={!showPassword}
+              value={password}
+              onChangeText={setPassword}
+            />
+            <TouchableOpacity
+              style={styles.showPasswordButton}
+              onPress={() => setShowPassword(!showPassword)}
+            >
+              <Icon
+                name={showPassword ? 'eye-off' : 'eye'}
+                size={24}
+                color="#457B9D"
               />
-              <TouchableOpacity
-                onPress={() => setShowPassword(!showPassword)}
-                style={styles.eyeIcon}
-                activeOpacity={0.7}
-              >
-                <Icon
-                  name={showPassword ? 'eye' : 'eye-off'}
-                  size={24}
-                  color="#f97316"
-                />
-              </TouchableOpacity>
-            </View>
-            {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+            </TouchableOpacity>
           </View>
 
           <TouchableOpacity
@@ -536,7 +695,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     paddingHorizontal: 4,
   },
-  passwordWrapper: {
+  passwordContainer: {
     position: 'relative',
     marginBottom: 4,
   },
@@ -556,7 +715,7 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 6,
   },
-  eyeIcon: {
+  showPasswordButton: {
     position: 'absolute',
     right: 15,
     top: '35%',
@@ -714,6 +873,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     textAlign: 'center',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff7ed',
   },
 });
 

@@ -16,10 +16,12 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import { fetchUser } from '../../services/Firebase/firestoreService';
 import { getAuth } from "../../services/Firebase/firebaseConfig";
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../../context/AuthContext';
 
 const ProfileScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
+  const { logout } = useAuth();
   const emailParam = route.params?.email || null;
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -89,28 +91,8 @@ const ProfileScreen = () => {
 
   const handleLogout = async () => {
     try {
-      // Clear all AsyncStorage data
-      await AsyncStorage.multiRemove([
-        '@user_data',
-        '@is_logged_in',
-        '@auth_user',
-        'userEmail',
-        'locationData',
-        'lastLocationUpdate',
-        'attendanceData',
-        'lastAttendanceUpdate'
-      ]);
-
-      // Clear user context
-      setUserData(null);
-
-      // Navigate to login screen and clear navigation stack
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
-      });
-
-      console.log("User signed out successfully!");
+      // Use the AuthContext's logout function
+      await logout(navigation);
     } catch (error) {
       console.error("Logout Error:", error);
       Alert.alert("Error", "Failed to logout. Please try again.");

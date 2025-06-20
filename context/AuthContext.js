@@ -3,12 +3,18 @@ import { View, Text, ActivityIndicator, Platform } from 'react-native';
 import { firebase } from '../services/Firebase/firebaseConfig';
 import { getAuthState, clearAuthState, setAuthState, isFirstInstall } from '../services/Firebase/authUtils';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CommonActions } from '@react-navigation/native';
 
 // 1. Create the context
 export const AuthContext = createContext(null);
 
 // Basic fallback to detect physical device
 const isPhysicalDevice = Platform.OS !== 'web' && !__DEV__;
+
+// Valid roles configuration
+const VALID_ROLES = ['student', 'staff', 'admin', 'faculty'];
+const DEFAULT_ROLE = 'student';
 
 // Register and save Expo push token to Firestore
 const registerAndSavePushToken = async (user) => {
@@ -92,6 +98,83 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
+  const validateRole = (role) => {
+    if (!role || typeof role !== 'string') return DEFAULT_ROLE;
+    const normalizedRole = role.toLowerCase();
+    return VALID_ROLES.includes(normalizedRole) ? normalizedRole : DEFAULT_ROLE;
+  };
+
+  const login = async (userData) => {
+    try {
+      // Ensure role is valid
+      const validatedRole = validateRole(userData.role);
+      const normalizedUser = {
+        ...userData,
+        role: validatedRole,
+        email: userData.email.toLowerCase().trim()
+      };
+
+      setUser(normalizedUser);
+      setIsLoggedIn(true);
+      await setAuthState(normalizedUser);
+
+      // Debug log
+      console.log('[DEBUG] Login successful:', {
+        email: normalizedUser.email,
+        role: normalizedUser.role,
+        isLoggedIn: true
+      });
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
+    }
+  };
+
+  const logout = async (navigation) => {
+    try {
+      // Sign out from Firebase
+      await firebase.auth().signOut();
+      
+      // Clear all stored data
+      const keysToRemove = [
+        '@user_data',
+        '@is_logged_in',
+        '@user_email',
+        '@user_password',
+        '@auth_user',
+        '@auth_password',
+        '@navigation_state',
+        'userEmail',
+        'locationData',
+        'lastLocationUpdate',
+        'attendanceData',
+        'lastAttendanceUpdate'
+      ];
+
+      // Clear all AsyncStorage data
+      await AsyncStorage.multiRemove(keysToRemove);
+      await clearAuthState();
+
+      // Reset state
+      setUser(null);
+      setIsLoggedIn(false);
+      setAuthError(null);
+
+      // Reset navigation state to initial route
+      if (navigation) {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        });
+      }
+
+      console.log('[DEBUG] User signed out successfully');
+    } catch (error) {
+      console.error('Logout error:', error);
+      throw error;
+    }
+  };
+
   // Set up authentication
   useEffect(() => {
     let unsubscribeFromAuth = null;
@@ -115,19 +198,55 @@ export const AuthProvider = ({ children }) => {
               
               if (userDoc.exists) {
                 const userData = userDoc.data();
-                const completeUser = {
-                  uid: firebaseUser.uid,
+                const validatedRole = validateRole(userData.role);
+                
+                // Register push token
+                await registerAndSavePushToken(firebaseUser);
+                
+                // Update user state
+                const normalizedUser = {
+                  ...userData,
                   email: lowerEmail,
-                  emailVerified: firebaseUser.emailVerified,
-                  token: idToken,
-                  ...userData
+                  role: validatedRole,
+                  uid: firebaseUser.uid
                 };
-                await setAuthState(completeUser);
-                setUser(completeUser);
+                
+                // Set user state and persist it
+                setUser(normalizedUser);
                 setIsLoggedIn(true);
+                await setAuthState(normalizedUser);
 
-                // Register and save push token
-                await registerAndSavePushToken(completeUser);
+                // Prepare navigation - map faculty to staff dashboard
+                const effectiveRole = validatedRole === 'faculty' ? 'staff' : validatedRole;
+                const dashboardRoute = `${effectiveRole.charAt(0).toUpperCase() + effectiveRole.slice(1)}Dashboard`;
+                
+                // Debug navigation state
+                console.log('[DEBUG] Auto-login navigation:', {
+                  originalRole: validatedRole,
+                  effectiveRole,
+                  targetRoute: dashboardRoute,
+                  hasNavigationRef: !!global.navigationRef?.current,
+                  isNavigationReady: global.navigationRef?.current?.isReady?.()
+                });
+
+                // Wait a bit to ensure navigation is ready
+                setTimeout(() => {
+                  if (global.navigationRef?.current?.isReady?.()) {
+                    console.log('[DEBUG] Executing navigation to:', dashboardRoute);
+                    global.navigationRef.current.dispatch(
+                      CommonActions.reset({
+                        index: 0,
+                        routes: [{ name: dashboardRoute }],
+                      })
+                    );
+                  } else {
+                    console.log('[DEBUG] Navigation not ready, storing pending navigation');
+                    global.pendingNavigation = {
+                      route: dashboardRoute,
+                      action: 'reset'
+                    };
+                  }
+                }, 100);
               } else {
                 throw new Error('User document not found');
               }
@@ -144,8 +263,7 @@ export const AuthProvider = ({ children }) => {
           setInitializing(false);
         });
       } catch (error) {
-        console.error('Auth initialization error:', error);
-        setAuthError('Failed to initialize authentication');
+        console.error('Error checking auth state:', error);
         setInitializing(false);
       }
     };
@@ -153,7 +271,7 @@ export const AuthProvider = ({ children }) => {
     checkAuthState();
 
     return () => {
-      if (typeof unsubscribeFromAuth === 'function') {
+      if (unsubscribeFromAuth) {
         unsubscribeFromAuth();
       }
     };
@@ -162,30 +280,27 @@ export const AuthProvider = ({ children }) => {
   if (initializing) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#ea580c" />
-        <Text style={{ marginTop: 10 }}>Loading authentication...</Text>
+        <ActivityIndicator size="large" color="#f97316" />
+        <Text style={{ marginTop: 10, color: '#1D3557' }}>
+          Loading user data...
+        </Text>
       </View>
     );
   }
-
-  if (authError) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-        <Text style={{ color: 'red', fontSize: 18 }}>{authError}</Text>
-        <Text style={{ marginTop: 10 }}>Please restart the app</Text>
-      </View>
-    );
-  }
-
-  const value = {
-    user,
-    setUser,
-    isLoggedIn,
-    setIsLoggedIn,
-  };
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider
+      value={{
+        user,
+        setUser,
+        isLoggedIn,
+        setIsLoggedIn,
+        login,
+        logout,
+        authError,
+        initializing,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -194,7 +309,7 @@ export const AuthProvider = ({ children }) => {
 // 3. Custom hook to use auth context
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === null) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
