@@ -494,6 +494,12 @@ const normalizeTimeFormat = (timeStr) => {
   if (!timeStr) return null;
   // Remove any extra whitespace
   timeStr = timeStr.trim();
+  
+  // Convert 24:00 to 00:00
+  if (timeStr === '24:00') {
+    timeStr = '00:00';
+  }
+  
   // Add leading zero if needed
   if (timeStr.length === 4 && timeStr.includes(':')) {
     timeStr = '0' + timeStr;
@@ -565,8 +571,10 @@ const checkWorkingHours = async (forceFresh = false) => {
     const startMinutes = startHour * 60 + startMinute;
     let endMinutes = endHour * 60 + endMinute;
 
-    // Handle overnight shifts
-    if (endHour < startHour) {
+    // Handle overnight shifts and 24:00/00:00 edge case
+    if (endTime === '00:00') {
+      endMinutes = 24 * 60; // Set to end of day
+    } else if (endHour < startHour) {
       endMinutes += 24 * 60; // Add 24 hours
       if (currentHour < startHour) {
         // We're in the early hours of the next day

@@ -4,8 +4,6 @@ import * as Location from 'expo-location';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { locationPermissionNavigationEmitter } from '../services/LocationService';
-import { db } from '../services/Firebase/firebaseConfig';
-import { checkWorkingHours } from '../services/LocationService';
 
 const LocationPermissionScreen = () => {
   const [permissionStatus, setPermissionStatus] = useState({
@@ -17,72 +15,7 @@ const LocationPermissionScreen = () => {
   const navigation = useNavigation();
 
   useEffect(() => {
-    let mounted = true;
-    let workingHoursInterval = null;
-    let settingsUnsubscribe = null;
-
-    const checkPermissionsAndWorkingHours = async () => {
-      try {
-        // Check working hours first
-        const workingHoursCheck = await checkWorkingHours(true);
-        
-        // If outside working hours, navigate back
-        if (!workingHoursCheck.isWithinWorkingHours && mounted) {
-          const routeName = navigation.getState()?.routes?.[0]?.params?.returnTo || 'AdminDashboard';
-          navigation.reset({
-            index: 0,
-            routes: [{ name: routeName }],
-          });
-          return;
-        }
-
-        // Check foreground permission
-        const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
-        
-        // Check background permission
-        const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
-        
-        // Check if location services are enabled
-        const servicesEnabled = await Location.hasServicesEnabledAsync();
-
-        if (mounted) {
-          setPermissionStatus({
-            foreground: foregroundStatus,
-            background: backgroundStatus,
-            services: servicesEnabled
-          });
-
-          // If all permissions are granted, navigate back to app
-          if (foregroundStatus === 'granted' && 
-              backgroundStatus === 'granted' && 
-              servicesEnabled) {
-            const routeName = navigation.getState()?.routes?.[0]?.params?.returnTo || 'AdminDashboard';
-            navigation.reset({
-              index: 0,
-              routes: [{ name: routeName }],
-            });
-          }
-        }
-      } catch (error) {
-        console.error('[Location Permission] Error checking permissions:', error);
-      }
-    };
-
-    // Initial check
-    checkPermissionsAndWorkingHours();
-
-    // Set up real-time listener for settings changes
-    settingsUnsubscribe = db.collection('settings').doc('attendance')
-      .onSnapshot(async () => {
-        if (mounted) {
-          await checkPermissionsAndWorkingHours();
-        }
-      }, (error) => {
-        console.error('[Location Permission] Settings listener error:', error);
-      });
-
-    // Check working hours and permissions every 20 seconds
-    workingHoursInterval = setInterval(checkPermissionsAndWorkingHours, 20000);
+    checkPermissions();
 
     // Prevent going back
     const backHandler = BackHandler.addEventListener(
@@ -114,23 +47,53 @@ const LocationPermissionScreen = () => {
       'requireLocationPermission',
       (required) => {
         if (required) {
-          checkPermissionsAndWorkingHours();
+          checkPermissions();
         }
       }
     );
 
+    // Check permissions every 2 seconds
+    const permissionCheckInterval = setInterval(checkPermissions, 2000);
+
     return () => {
-      mounted = false;
       backHandler.remove();
       subscription.remove();
-      if (workingHoursInterval) {
-        clearInterval(workingHoursInterval);
-      }
-      if (settingsUnsubscribe) {
-        settingsUnsubscribe();
-      }
+      clearInterval(permissionCheckInterval);
     };
   }, []);
+
+  const checkPermissions = async () => {
+    try {
+      // Check foreground permission
+      const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
+      
+      // Check background permission
+      const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
+      
+      // Check if location services are enabled
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+
+      setPermissionStatus({
+        foreground: foregroundStatus,
+        background: backgroundStatus,
+        services: servicesEnabled
+      });
+
+      // If all permissions are granted, navigate back to app
+      if (foregroundStatus === 'granted' && 
+          backgroundStatus === 'granted' && 
+          servicesEnabled) {
+        // Get the previous route name or default to AdminDashboard
+        const routeName = navigation.getState()?.routes?.[0]?.params?.returnTo || 'AdminDashboard';
+        navigation.reset({
+          index: 0,
+          routes: [{ name: routeName }],
+        });
+      }
+    } catch (error) {
+      console.error('[Location Permission] Error checking permissions:', error);
+    }
+  };
 
   const handleEnableLocation = async () => {
     try {
