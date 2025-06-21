@@ -9,6 +9,12 @@ const deviceInfoSchema = new mongoose.Schema({
 }, { _id: false });
 
 const locationSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    index: true
+  },
   accuracy: Number,
   altitude: Number,
   appState: String,
@@ -20,7 +26,6 @@ const locationSchema = new mongoose.Schema({
   longitude: { type: Number, required: true },
   speed: Number,
   timestamp: { type: Date, default: Date.now },
-  userId: { type: String, required: true, unique: true },
   userRole: { type: String, required: true },
   currentLocation: { type: mongoose.Schema.Types.Mixed },
   locationHistory: [{
@@ -37,7 +42,7 @@ const locationSchema = new mongoose.Schema({
 });
 
 // Create index for efficient querying
-locationSchema.index({ userId: 1 });
+locationSchema.index({ email: 1 });
 
 const Location = mongoose.model('Location', locationSchema);
 

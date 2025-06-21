@@ -2,16 +2,21 @@ const express = require('express');
 const router = express.Router();
 const Location = require('../models/Location');
 
-// Save/Update location
-router.post('/', async (req, res) => {
+// Save/Update location with email
+router.post('/save', async (req, res) => {
   try {
     const locationData = req.body;
     
-    // Update or create location document for user
+    if (!locationData.email) {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+
+    // Update or create location document for user by email
     const updatedLocation = await Location.findOneAndUpdate(
-      { userId: locationData.userId },
+      { email: locationData.email },
       { 
         $set: { 
+          email: locationData.email,
           accuracy: locationData.accuracy,
           altitude: locationData.altitude,
           appState: locationData.appState,
@@ -34,44 +39,54 @@ router.post('/', async (req, res) => {
       }
     );
 
-    res.status(200).json({ success: true, message: 'Location updated successfully' });
+    res.status(200).json({ 
+      success: true, 
+      message: 'Location updated successfully',
+      data: updatedLocation
+    });
   } catch (error) {
     console.error('Error updating location:', error);
     res.status(500).json({ success: false, message: 'Error updating location' });
   }
 });
 
-// Get user's last location
-router.get('/last/:userId', async (req, res) => {
+// Get location by email
+router.get('/email/:email', async (req, res) => {
   try {
-    const { userId } = req.params;
-    const location = await Location.findOne({ userId });
-    res.json(location || null);
+    const { email } = req.params;
+    
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+
+    const location = await Location.findOne({ email });
+    
+    if (!location) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'No location found for this email' 
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: location
+    });
   } catch (error) {
-    console.error('Error getting last location:', error);
-    res.status(500).json({ success: false, message: 'Error getting last location' });
+    console.error('Error getting location by email:', error);
+    res.status(500).json({ success: false, message: 'Error getting location' });
   }
 });
 
-// Get user's location history within date range
-router.get('/history/:userId', async (req, res) => {
+// Add a test endpoint
+router.get('/test', async (req, res) => {
   try {
-    const { userId } = req.params;
-    const { startDate, endDate } = req.query;
-
-    const query = { userId };
-    if (startDate && endDate) {
-      query.timestamp = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
-      };
-    }
-
-    const locations = await Location.find(query).sort({ timestamp: -1 });
-    res.json(locations);
+    res.status(200).json({ 
+      success: true, 
+      message: 'API is working' 
+    });
   } catch (error) {
-    console.error('Error getting location history:', error);
-    res.status(500).json({ success: false, message: 'Error getting location history' });
+    res.status(500).json({ success: false, message: 'API test failed' });
   }
 });
 
