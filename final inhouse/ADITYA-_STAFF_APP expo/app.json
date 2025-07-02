@@ -1,0 +1,109 @@
+{
+  "expo": {
+    "name": "ADITYA-APP",
+    "slug": "aditya-app",
+    "version": "1.0.0",
+    "owner": "kathipallimadhu15",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you share them with your friends.",
+          "cameraPermission": "The app accesses your camera to let you take profile photos."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location for attendance tracking.",
+          "locationAlwaysPermission": "Allow $(PRODUCT_NAME) to use your location in the background for attendance tracking.",
+          "locationWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location while the app is active.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera for facial recognition and attendance verification."
+        }
+      ],
+      [
+        "expo-background-task",
+        {
+          "startOnBoot": true,
+          "stopOnTerminate": false
+        }
+      ],
+      "expo-dev-client"
+    ],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.adityaapp",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera for facial recognition to mark your attendance securely.",
+        "NSPhotoLibraryUsageDescription": "This app uses the photo library to let you choose profile photos.",
+        "NSPhotoLibraryAddUsageDescription": "This app needs access to save photos to your library.",
+        "NSLocationWhenInUseUsageDescription": "This app needs access to location to track your attendance while you are using it.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to location to track your attendance even when closed.",
+        "NSLocationAlwaysUsageDescription": "This app needs access to location to track your attendance in the background.",
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
+      },
+      "config": {
+        "googleMapsApiKey": "YOUR_IOS_API_KEY"
+      }
+    },
+    "android": {
+      "permissions": [
+        "CAMERA",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "WAKE_LOCK"
+      ],
+      "package": "com.adityaapp.tracking",
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "foregroundService": {
+        "name": "Location Service",
+        "notificationTitle": "Location Tracking Active",
+        "notificationColor": "#4CAF50"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDVRuwod-NCrYV7gTyX2fa8xsrO7p2vU8M"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "0cb66d88-b773-4dde-9328-52d2c08675a8"
+      }
+    }
+  }
+}
